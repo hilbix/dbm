@@ -1,3 +1,8 @@
+2004-12-13    <tino@firebird.03.softkill.net>
+
+	* dbm.c (hunt): some changes migth correct errors (never checked).
+	(c_filter): added
+
 2004-09-05    <tino@firebird.03.softkill.net>
 
 	VERSION 0.2.0

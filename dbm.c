@@ -22,7 +22,10 @@
  * USA
  *
  * $Log$
- * Revision 1.6  2004-11-19 05:21:56  tino
+ * Revision 1.7  2004-12-13 23:35:39  tino
+ * filter command added
+ *
+ * Revision 1.6  2004/11/19 05:21:56  tino
  * More variants: update and b*
  *
  * Revision 1.5  2004/09/04 22:24:29  tino
@@ -573,7 +576,7 @@ hunt(int wild, int argc, char **argv)
 	      if (tino_memwildcmp(data.dptr, data.dsize, argv[j], tot[j]))
 		continue;
 	    }
-	  else if (data.dsize!=tot[j] || strcmp(argv[j], data.dptr))
+	  else if (data.dsize!=tot[j] || strncmp(argv[j], data.dptr, tot[j]))
 	    continue;
 	  fwrite(key.dptr, key.dsize, 1, stdout);
 	  putchar('\n');
@@ -597,6 +600,62 @@ c_search(int argc, char **argv)
   hunt(1, argc, argv);
 }
 
+#if 1
+#define	DP(X)	do { ; } while (0)
+#else
+#define	DP(X)	do { dprintf X; } while (0)
+static void
+dprintf(const char *s, ...)
+{
+  va_list	list;
+
+  fprintf(stderr, "[");
+  va_start(list, s);
+  vfprintf(stderr, s, list);
+  va_end(list);
+  fprintf(stderr, "]\n");
+}
+#endif
+
+static void
+c_filter(int argc, char **argv)
+{
+  const char	*term, *d;
+  int		k, m, p, i, c, dl;
+
+  db_open(argv[0], GDBM_READER, NULL);
+  term	= (argc>0 ? argv[1] : "");
+  d	= (argc>1 ? argv[2] : NULL);
+  dl	= 0;
+  if (d)
+    dl	= strlen(d);
+  k	= *term ? *term++!='0' : 0;
+  m	= *term ? *term++!='0' : 0;
+  p	= *term ? *term++!='0' : 0;
+  if (!*term)
+    term	= "\n";
+  for (i=0; !feof(stdout) && ((c=read_key_term_s(term))!=EOF || key.dsize); i++)
+    {
+      DP(("key %.*s", key.dsize, key.dptr));
+      data	= gdbm_fetch(db, key);
+      DP(("miss %d", !data.dptr));
+      if (k==!data.dptr)
+	continue;
+      DP(("here"));
+      if (d)
+	{
+	  DP(("check"));
+	  if ((p
+	      ? !tino_memwildcmp(data.dptr, data.dsize, d, dl)
+	      : (data.dsize==dl && !strncmp(d, data.dptr, dl))
+	       )!=m)
+	    continue;
+	}
+      DP(("put"));
+      fwrite(key.dptr, key.dsize, 1, stdout);
+      fputs(term, stdout);
+    }
+}
 
 struct
   {
@@ -621,6 +680,7 @@ struct
     { "bins",	c_bins,		0, 2	},
     { "brep",	c_brep,		0, 2	},
     { "bupd",	c_bupd,		0, 2	},
+    { "filter",	c_filter,	0, 2	},
     { "find",	c_find,		2, -1	},
     { "search",	c_search,	2, -1	},
   };
@@ -661,10 +721,16 @@ main(int argc, char **argv)
 	     "\n"
 	     "\tbins	[s [t]]	insert key/data read from stdin\n"
 	     "\t		s is the key terminator, default ''=blanks.\n"
-	     "\t		t is the data terminator, default ''=[CR]LF.\n"
+	     "\t		t is the data terminator, default ''=LF.\n"
 	     "\tbrep	[s [t]]	as before, but use replace\n"
 	     "\tbupd	[s [t]]	as before, but use update\n"
 	     "\tbdel	[s]	delete keys read from stdin\n"
+	     "\n"
+	     "\tfilter	kmpt d	filter keys read from stdin (default: kmpt=000)\n"
+	     "\t		Key must (k!=0) or must not exist (k=0)\n"
+	     "\t		Data must match (m!=0) or must not match (m=0)\n"
+	     "\t		Data match is exact (p=0) or pattern (p!=0)\n"
+	     "\t		t is the line terminater, default ''=LF\n"
 	     "\n"
 	     "\tfind	n data	find n keys which have exact data (slow), 0=all\n"
 	     "\t		Multiple data arguments give alternatives (=OR)\n"
