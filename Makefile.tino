@@ -4,7 +4,10 @@
 # See tino/Makefile.proto for description.
 #
 # $Log$
-# Revision 1.5  2004-11-19 05:21:33  tino
+# Revision 1.6  2004-12-14 00:14:19  tino
+# corrected for new tinolib, such that dbm_version.h is created
+#
+# Revision 1.5  2004/11/19 05:21:33  tino
 # Link library entry fixed
 #
 # Revision 1.4  2004/09/04 22:21:37  tino
@@ -19,8 +22,7 @@
 # Revision 1.1  2004/07/21 20:07:34  tino
 # first version, should do
 
-       PROG=dbm
-      PROGS=$(PROG)
+      PROGS=dbm
        OBJS=
        LIBS=
  ADD_CFLAGS=
@@ -31,12 +33,13 @@ ADD_LDFLAGS=-lgdbm
    TINOCOPY=tino/memwild.h
 #    TINOINC=tino_common.h
 #    TINOLIB=tino/lib.h
+#INSTALLPATH=/usr/local
 # DBG_CFLAGS=
 #DBG_LDFLAGS=
 # DBG_LDLIBS=-lefence
 # STD_CFLAGS=
 #STD_LDFLAGS=
 # STD_LDLIBS=
-##END##
+
 Makefile::
 	$(MAKE) -C tino tino HERE="$(PWD)"
