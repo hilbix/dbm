@@ -1,12 +1,22 @@
 2004-07-23    <tino@firebird.03.softkill.net>
 
+	VERSION 0.1.1
+
+	* Makefile.tino: changes for internal settings update
+
+	* dbm.c: GPL preamble added
+
 	* dbm.c (c_create, db_open): added stat calls, GDBM_WRITER creates
 	the database instead of GDBM_WRCREAT.
 	(c_list): number detection changed, 0 now is 'all'
+	(c_dump, dump, dumpline): added for diagnostic dump
 
 2004-07-22    <tino@firebird.03.softkill.net>
 
-	VERSION 0.1.0
-
 	* dbm.c (batch_store, batcher, c_batch, c_batch0): added
 	(main): find from help removed
+
+2004-07-21    <tino@firebird.03.softkill.net>
+
+	VERSION 0.0.1
+

@@ -4,14 +4,18 @@
 # See tino/Makefile.proto for description.
 #
 # $Log$
-# Revision 1.1  2004-07-21 20:07:34  tino
-# first version, should do
+# Revision 1.2  2004-07-23 19:17:34  tino
+# cosmetic changes
 #
+# Revision 1.1  2004/07/21 20:07:34  tino
+# first version, should do
 
        PROG=dbm
       PROGS=$(PROG)
        OBJS=
      LDFLAGS=-lgdbm
+      CLEAN=
+  DISTCLEAN=*.tmp
 #    LDFLAGS=-lefence
 #    TINOINC=tino_common.h
 #    TINOLIB=tino/lib.h
