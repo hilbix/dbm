@@ -22,7 +22,10 @@
  * USA
  *
  * $Log$
- * Revision 1.7  2004-12-13 23:35:39  tino
+ * Revision 1.8  2004-12-14 00:17:29  tino
+ * Version now shown in Usage
+ *
+ * Revision 1.7  2004/12/13 23:35:39  tino
  * filter command added
  *
  * Revision 1.6  2004/11/19 05:21:56  tino
@@ -693,7 +696,7 @@ main(int argc, char **argv)
   if (argc<2)
     {
       printf("Usage: %s action gdbm-file [args...]\n"
-	     "\tVersion compiled %s\n"
+	     "\tVersion %s compiled %s\n"
 	     "\n"
 	     "\tAction	Args	Description:\n"
 	     "\t-------	-------	------------\n"
@@ -739,7 +742,7 @@ main(int argc, char **argv)
 	     "\tpattern help:   ?, *, [^xyz] or [a-z] are supported.  Hints:\n"
 	     "\t		[*], [?], [[] matches literal *, ?, [ respectively\n"
 	     "\t		[[-[-] matches [ or -, [z-a] matches b to y\n"
-	     , argv[0], __DATE__);
+	     , argv[0], DBM_VERSION, __DATE__);
       return 1;
     }
   for (i=sizeof actions/sizeof *actions; --i>=0; )
