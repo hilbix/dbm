@@ -22,7 +22,10 @@
  * USA
  *
  * $Log$
- * Revision 1.5  2004-09-04 22:24:29  tino
+ * Revision 1.6  2004-11-19 05:21:56  tino
+ * More variants: update and b*
+ *
+ * Revision 1.5  2004/09/04 22:24:29  tino
  * find and search added
  *
  * Revision 1.4  2004/08/22 05:52:30  Administrator
@@ -88,7 +91,7 @@ fatal_func(const char *s)
 }
 
 static GDBM_FILE	db;
-static datum		key, data;
+static datum		key, data, kbuf, kbuf2;
 
 static void
 db_open(char *name, int mode, const char *type)
@@ -164,11 +167,13 @@ db_data(int argc, char **argv)
 }
 
 static void
-db_store(int argc, char **argv, int flag)
+db_store(int argc, char **argv, int flag, int check)
 {
   db_open(argv[0], GDBM_WRITER, NULL);
   db_key(argv[1]);
   db_data(argc-2, argv+2);
+  if (check && !gdbm_exists(db, key))
+    ex("key does not exist: %s", argv[0]);
   if (gdbm_store(db, key, data, flag))
     ex("cannot store %s into %s", argv[1], argv[0]);
 }
@@ -317,13 +322,19 @@ c_dump(int argc, char **argv)
 static void
 c_insert(int argc, char **argv)
 {
-  db_store(argc, argv, GDBM_INSERT);
+  db_store(argc, argv, GDBM_INSERT, 0);
 }
 
 static void
 c_replace(int argc, char **argv)
 {
-  db_store(argc, argv, GDBM_REPLACE);
+  db_store(argc, argv, GDBM_REPLACE, 0);
+}
+
+static void
+c_update(int argc, char **argv)
+{
+  db_store(argc, argv, GDBM_REPLACE, 1);
 }
 
 static void
@@ -361,30 +372,40 @@ batch_store(int argc, char **argv)
   ex("cannot store %s into %s", argv[1], argv[0]);
 }
 
+static __inline__ void
+kbuf_set(int i, char c)
+{
+  if (i>=kbuf.dsize)
+    {
+      kbuf.dsize	= i+BUFSIZ;
+      kbuf.dptr		= my_realloc(kbuf.dptr, kbuf.dsize);
+    }
+  kbuf.dptr[i]	= c;
+}
+
+static int
+read_key_term_c(int term)
+{
+  int	i, c;
+
+  for (i=0; (c=getchar())!=EOF && c!=term; i++)
+    kbuf_set(i, c);
+  key		= kbuf;
+  key.dsize	= i;
+  return c;
+}
+
 static void
 batcher(int argc, char **argv, int term)
 {
-  char		*buf;
-  size_t	len;
-  int		c;
+  int	c;
 
   db_open(argv[0], GDBM_WRITER, NULL);
   argc--;
   argv++;
-  len	= 0;
-  buf	= 0;
   do
     {
-      int	i;
-
-      for (i=0; (c=getchar())!=EOF && c!=term; i++)
-	{
-	  if (i>=len)
-	    buf	= my_realloc(buf, len+=BUFSIZ);
-	  buf[i]	= c;
-	}
-      key.dsize	= i;
-      key.dptr	= buf;
+      c	= read_key_term_c(term);
       batch_store(argc, argv);
     } while (c!=EOF);
 }  
@@ -401,7 +422,128 @@ c_batch0(int argc, char **argv)
   batcher(argc, argv, 0);
 }
 
+static int
+read_key_term_s(const char *term)
+{
+  int		i, c, l;
+  size_t	len;
+
+  if (!*term)
+    {
+      for (i=0; (c=getchar())!=EOF && !isspace(c); i++)
+        kbuf_set(i, c);
+      key	= kbuf;
+      key.dsize	= i;
+      return c;
+    }
+  len	= strlen(term)-1;
+  l	= term[len];
+  for (i=0; (c=getchar())!=EOF; i++)
+    {
+      if (c==l && i>=len && !memcmp(kbuf.dptr+i-len, term, len))
+        {
+	  i	-= len;
+	  break;
+        }
+      kbuf_set(i, c);
+    }
+  key		= kbuf;
+  key.dsize	= i;
+  return c;
+}
+
+static int
+read_data_term_s(const char *term)
+{
+  datum	tmp1, tmp2;
+  int	c;
+
+  /* ugly hack: switch to kbuf2
+   */
+  tmp1	= key;
+  tmp2	= kbuf;
+  kbuf	= kbuf2;
+
+  c	= read_key_term_s(term);
+
+  /* ugly hack:
+   * store key value as data
+   */
+  data	= key;
+
+  /* ugly hack:
+   * switch back
+   */
+  kbuf2	= kbuf;
+  kbuf	= tmp2;
+  key	= tmp1;
+
+  return c;
+}
+
+static void
+c_bdel(int argc, char **argv)
+{
+  const char	*term;
+  int		c;
+
+  db_open(argv[0], GDBM_WRITER, NULL);
+  term	= (argc ? argv[1] : "");
+  while ((c=read_key_term_s(term))!=EOF || key.dsize)
+    {
+      if (gdbm_delete(db, key))
+        ex("could not delete '%s': %s", argv[1], argv[0]);
+      if (c==EOF)
+	break;
+    }
+}
+
+static void
+batch_read(int argc, char **argv, int flag, int check)
+{
+  const char	*term, *eol;
+  int		i, c;
+
+  db_open(argv[0], GDBM_WRITER, NULL);
+  term	= (argc>0 ? argv[1] : "");
+  eol	= (argc>1 ? argv[2] : "");
+  if (!*eol)
+    eol	= "\n";
+  for (i=0; (c=read_key_term_s(term))!=EOF || key.dsize; i++)
+    {
+      data.dsize	= 0;
+      if (c!=EOF)
+        c	= read_data_term_s(eol);
+      if (check && !gdbm_exists(db, key))
+        ex("key/data pair %d has missing key", i);
+      if (gdbm_store(db, key, data, flag))
+        ex("cannot store key/data pair %d", i);
+      if (c==EOF)
+        break;
+    }
+}
+
+static void
+c_bins(int argc, char **argv)
+{
+  batch_read(argc, argv, GDBM_INSERT, 0);
+}
+
+static void
+c_brep(int argc, char **argv)
+{
+  batch_read(argc, argv, GDBM_REPLACE, 0);
+}
+
+static void
+c_bupd(int argc, char **argv)
+{
+  batch_read(argc, argv, GDBM_REPLACE, 1);
+}
+
 /* Well, there is a funny side effect, which is a feature:
+ * Uh .. forgot to note that .. think this is missing now,
+ * as tino_memwildcmp is used.
  */
 static void
 hunt(int wild, int argc, char **argv)
@@ -470,10 +612,15 @@ struct
     { "dump",	c_dump,		0, 1	},
     { "insert",	c_insert,	1, 2	},
     { "replace",c_replace,	1, 2	},
+    { "update",	c_update,	1, 2	},
     { "delete",	c_delete,	1, 1	},
     { "get",	c_get,		1, 1	},
     { "batch",	c_batch,	1, 2	},
     { "batch0",	c_batch0,	1, 2	},
+    { "bdel",	c_bdel,		0, 1	},
+    { "bins",	c_bins,		0, 2	},
+    { "brep",	c_brep,		0, 2	},
+    { "bupd",	c_bupd,		0, 2	},
     { "find",	c_find,		2, -1	},
     { "search",	c_search,	2, -1	},
   };
@@ -499,9 +646,9 @@ main(int argc, char **argv)
 	     "\n"
 	     "\tinsert	key [d]	insert d(ata) under key, must not exist\n"
 	     "\t		If d is missing, data is read from stdin\n"
-	     "\treplace	key [d]	insert d(ata) under key, must not exist\n"
-	     "\t		If d is missing, data is read from stdin\n"
-	     "\tdelete	key	delete entry with key\n"
+	     "\tupdate	key [d]	as before, but key must exist.\n"
+	     "\treplace	key [d]	as before, but replace (insert+update)\n"
+	     "\tdelete	key	delete entry with key given\n"
 	     "\n"
 	     "\tget	key	print data under key to stdout\n"
 	     "\n"
@@ -511,6 +658,13 @@ main(int argc, char **argv)
 	     "\t		If r is missing, existing keys are ignored.\n"
 	     "\tbatch0	i [r]	like batch, but keys are terminated by NUL\n"
 	     "\t		(find . -type f -print0 | dbm batch0 db x y)\n"
+	     "\n"
+	     "\tbins	[s [t]]	insert key/data read from stdin\n"
+	     "\t		s is the key terminator, default ''=blanks.\n"
+	     "\t		t is the data terminator, default ''=[CR]LF.\n"
+	     "\tbrep	[s [t]]	as before, but use replace\n"
+	     "\tbupd	[s [t]]	as before, but use update\n"
+	     "\tbdel	[s]	delete keys read from stdin\n"
 	     "\n"
 	     "\tfind	n data	find n keys which have exact data (slow), 0=all\n"
 	     "\t		Multiple data arguments give alternatives (=OR)\n"
