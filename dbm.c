@@ -7,9 +7,11 @@
  * This source shall be independent of others.  Therefor no tinolib.
  *
  * $Log$
- * Revision 1.1  2004-07-21 20:07:34  tino
- * first version, should do
+ * Revision 1.2  2004-07-23 18:48:25  tino
+ * minor changes, diagnostic dump and batch key insert/replace added
  *
+ * Revision 1.1  2004/07/21 20:07:34  tino
+ * first version, should do
  */
 #include <stdio.h>
 #include <string.h>
@@ -23,7 +25,7 @@
 
 #include <sys/time.h>
 #include <sys/types.h>
-#include <dirent.h>
+#include <sys/stat.h>
 
 #include "dbm_version.h"
 
@@ -42,6 +44,17 @@ ex(const char *s, ...)
   exit(-1);
 }
 
+static void *
+my_realloc(void *ptr, size_t len)
+{
+  void	*tmp;
+
+  tmp	= (ptr ? realloc(ptr, len) : malloc(len));
+  if (!tmp)
+    ex("out of memory");
+  return tmp;
+}
+
 static void
 fatal_func(const char *s)
 {
@@ -54,9 +67,13 @@ static datum		key, data;
 static void
 db_open(char *name, int mode, const char *type)
 {
+  struct stat	st;
+
   if (!type)
     type	= "open";
-  if ((db=gdbm_open(name, BUFSIZ, mode|GDBM_SYNC, 0775, fatal_func))==0)
+  if (mode!=GDBM_WRCREAT && lstat(name, &st))
+    ex("database missing: %s", name);
+  if ((db=gdbm_open(name, BUFSIZ, mode, 0775, fatal_func))==0)
     ex("cannot %s db: %s", type, name);
 }
 
@@ -78,7 +95,10 @@ static void
 db_close(void)
 {
   if (db)
-    gdbm_close(db);
+    {
+      gdbm_sync(db);
+      gdbm_close(db);
+    }
   db	= 0;
 }
 
@@ -108,9 +128,7 @@ db_data(int argc, char **argv)
 	  int	n, m;
 
 	  m		= data.dsize+BUFSIZ*16;
-	  data.dptr	= (data.dptr ? realloc(data.dptr, m) : malloc(m));
-	  if (!data.dptr)
-	    ex("out of memory");
+	  data.dptr	= my_realloc(data.dptr, m);
 	  n = fread(((char *)data.dptr)+data.dsize, 1, m-data.dsize, stdin);
 	  if (n<0 || ferror(stdin))
 	    ex("read error");
@@ -132,9 +150,9 @@ db_store(int argc, char **argv, int flag)
 static void
 c_create(int argc, char **argv)
 {
-  FILE	*fd;
+  struct stat	st;
 
-  if ((fd=fopen(argv[0], "r"))!=0)
+  if (!lstat(argv[0], &st))
     ex("already exists: %s", argv[0]);
   if (errno!=ENOENT)
     ex("not supported error return: %s", argv[0]);
@@ -163,18 +181,111 @@ static void
 c_list(int argc, char **argv)
 {
   unsigned long	n, i;
+  char		*end;
 
   n	= 1;
   if (argc)
-    n	= strtoul(argv[1], NULL, 0);
-  if (!n)
-    ex("wrong value: %s", argv[1]);
+    {
+      n	= strtoul(argv[1], &end, 0);
+      if (!end || *end)
+	ex("wrong value: %s", argv[1]);
+    }
   db_open(argv[0], GDBM_READER, NULL);
   if (!db_first())
     exit(1);
   for (i=0;
-       fwrite(key.dptr, key.dsize, 1, stdout), ++i<n && db_next();
+       fwrite(key.dptr, key.dsize, 1, stdout), (!n || ++i<n) && db_next();
        putchar('\n'));
+}
+
+#define	DUMPWIDTH	65	/* 32 for HEX, 64 for ascii	*/
+
+static int
+dumpline(const void *ptr, size_t len, int i)
+{
+  int	mode, c, pos;
+
+  mode	= 0;
+  pos	= 0;
+  do
+    {
+      c	= ((unsigned char *)ptr)[i];
+      if (isprint(c))
+	{
+	  if (!mode)
+	    {
+	      if (++pos>DUMPWIDTH-1)
+		break;
+	      if ((c=='\"' || c=='\\') && pos>=DUMPWIDTH-1)
+		break;
+	      putchar('"');
+	      mode	= 1;
+	    }
+	  if (++pos>DUMPWIDTH)
+	    break;
+	  if (c=='\"' || c=='\\')
+	    {
+	      if (++pos>DUMPWIDTH)
+		break;
+	      putchar('\\');
+	    }
+	  putchar(c);
+	  continue;
+	}
+      if (mode)
+	{
+	  putchar('"');
+	  mode	= 0;
+	  pos++;
+	}
+      if ((pos+=2)>DUMPWIDTH)
+	break;
+      putchar("0123456789abcdef"[(c>>4)&15]);
+      putchar("0123456789abcdef"[c&15]);
+    } while (++i<len);
+  if (mode)
+    putchar('"');
+  return i;
+}
+
+static void
+dump(const void *ptr, size_t len, const char *title)
+{
+  int	i;
+
+  i	= 0;
+  do
+    {
+      printf("%s %04x ", title, i);
+      i	= dumpline(ptr, len, i);
+      printf("\n");
+    } while (i<len);
+}
+
+static void
+c_dump(int argc, char **argv)
+{
+  unsigned long	n, i;
+  char		*end;
+
+  n	= 0;
+  if (argc)
+    {
+      n	= strtoul(argv[1], &end, 0);
+      if (!end || *end)
+	ex("wrong value: %s", argv[1]);
+    }
+  db_open(argv[0], GDBM_READER, NULL);
+  if (!db_first())
+    exit(1);
+  for (i=0;; )
+    {
+      data	= gdbm_fetch(db, key);
+      dump(key.dptr,  key.dsize, "key");
+      dump(data.dptr, data.dsize, "  data");
+      if ((n && ++i>=n) || !db_next())
+	break;
+    }
 }
 
 static void
@@ -209,6 +320,61 @@ c_get(int argc, char **argv)
   fwrite(data.dptr, data.dsize, 1, stdout);
 }
 
+static void
+batch_store(int argc, char **argv)
+{
+  db_data(0, argv);
+  if (!gdbm_store(db, key, data, GDBM_INSERT))
+    return;
+  if (argc)
+    {
+      db_data(0, argv+1);
+      if (!gdbm_store(db, key, data, GDBM_REPLACE))
+	return;
+    }
+  ex("cannot store %s into %s", argv[1], argv[0]);
+}
+
+static void
+batcher(int argc, char **argv, int term)
+{
+  char		*buf;
+  size_t	len;
+  int		c;
+
+  db_open(argv[0], GDBM_WRITER, NULL);
+  argc--;
+  argv++;
+  len	= 0;
+  buf	= 0;
+  do
+    {
+      int	i;
+
+      for (i=0; (c=getchar())!=EOF && c!=term; i++)
+	{
+	  if (i>=len)
+	    buf	= my_realloc(buf, len+=BUFSIZ);
+	  buf[i]	= c;
+	}
+      key.dsize	= i;
+      key.dptr	= buf;
+      batch_store(argc, argv);
+    } while (c!=EOF);
+}  
+
+static void
+c_batch(int argc, char **argv)
+{
+  batcher(argc, argv, '\n');
+}
+
+static void
+c_batch0(int argc, char **argv)
+{
+  batcher(argc, argv, 0);
+}
+
 struct
   {
     const char	*command;
@@ -220,10 +386,13 @@ struct
     { "kill",	c_kill,		0, 0	},
     { "reorg",	c_reorg,	0, 0	},
     { "list",	c_list,		0, 1	},
+    { "dump",	c_dump,		0, 1	},
     { "insert",	c_insert,	1, 2	},
     { "replace",c_replace,	1, 2	},
     { "delete",	c_delete,	1, 1	},
     { "get",	c_get,		1, 1	},
+    { "batch",	c_batch,	1, 2	},
+    { "batch0",	c_batch0,	1, 2	},
 #if 0
     { "find",	c_find,		1, 1	},
 #endif
@@ -245,14 +414,22 @@ main(int argc, char **argv)
 	     "\tkill	-	erase DBM file if empty\n"
 	     "\treorg	-	reorganize DBM\n"
 	     "\n"
-	     "\tlist	[n]	write first n keys to stdout, default 1\n"
+	     "\tlist	[n]	write n keys to stdout, default 1, 0=all\n"
+	     "\tdump	[n]	diagnostic dump, default 0=all\n"
 	     "\tinsert	key [d]	insert d(ata) under key, must not exist\n"
 	     "\t		If d is missing, data is read from stdin\n"
 	     "\treplace	key [d]	insert d(ata) under key, must not exist\n"
 	     "\t		If d is missing, data is read from stdin\n"
 	     "\tdelete	key	delete entry with key\n"
 	     "\tget	key	print data under key to stdout\n"
+	     "\tbatch	i [r]	read lines for insert/update keys\n"
+	     "\t		i is the data to insert.  If r is present,\n"
+	     "\t		it is the data to use for replace.\n"
+	     "\t		If r is missing, existing keys are ignored.\n"
+	     "\tbatch0	i [r]	like batch, but keys are terminated by NUL\n"
+#if 0
 	     "\tfind	data	hunt for key (slow)\n"
+#endif
 	     , argv[0], __DATE__);
       return 1;
     }
