@@ -1,26 +1,31 @@
 /* $Header$
  *
- * A little general DBM wrapper
+ * A little general DBM wrapper.
+ *
  * This source shall be independent of others.  Therefor no tinolib.
  *
  * Copyright (C)2004 by Valentin Hilbig
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
+ * published by the Free Software Foundation; either version 2 of the
+ * License, or (at your option) any later version.
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
+ * USA
  *
  * $Log$
- * Revision 1.4  2004-08-22 05:52:30  Administrator
+ * Revision 1.5  2004-09-04 22:24:29  tino
+ * find and search added
+ *
+ * Revision 1.4  2004/08/22 05:52:30  Administrator
  * Intermediate version for search functionality
  *
  * Revision 1.3  2004/07/23 19:17:34  tino
@@ -403,6 +408,8 @@ hunt(int wild, int argc, char **argv)
 {
   unsigned long	n, i;
   char		*end;
+  int		*tot=alloca((argc+1)*sizeof *tot);
+  int		j;
 
   n	= strtoul(argv[1], &end, 0);
   if (!end || *end)
@@ -411,15 +418,29 @@ hunt(int wild, int argc, char **argv)
   db_open(argv[0], GDBM_READER, NULL);
   if (!db_first())
     exit(1);
-  for (i=0;;)
+  i	= 0;
+  for (j=2; j<=argc; j++)
+    tot[j]	= strlen(argv[j]);
+  do
     {
+      data	= gdbm_fetch(db, key);
       for (j=2; j<=argc; j++)
 	{
+	  if (wild)
+	    {
+	      if (tino_memwildcmp(data.dptr, data.dsize, argv[j], tot[j]))
+		continue;
+	    }
+	  else if (data.dsize!=tot[j] || strcmp(argv[j], data.dptr))
+	    continue;
+	  fwrite(key.dptr, key.dsize, 1, stdout);
+	  putchar('\n');
+	  if (n && ++i>=n)
+	    return;
+	  break;
 	}
-      fwrite(key.dptr, key.dsize, 1, stdout);
-      if (n && i>=n || !db_next())
-	break;
     }
+  while (db_next());
 }
 
 static void
@@ -453,8 +474,8 @@ struct
     { "get",	c_get,		1, 1	},
     { "batch",	c_batch,	1, 2	},
     { "batch0",	c_batch0,	1, 2	},
-    { "find",	c_find,		2, 0	},
-    { "search",	c_search,	2, 0	},
+    { "find",	c_find,		2, -1	},
+    { "search",	c_search,	2, -1	},
   };
 
 int
@@ -496,8 +517,8 @@ main(int argc, char **argv)
 	     "\tsearch	n patrn	as before, but use patterns\n"
 	     "\n"
 	     "\tpattern help:   ?, *, [^xyz] or [a-z] are supported.  Hints:\n"
-	     *\t		[*], [?], [[] matches literal *, ?, [ respectively\n"
-	     *\t		[[-[-] matches [ or -, [z-a] matches b to y\n"
+	     "\t		[*], [?], [[] matches literal *, ?, [ respectively\n"
+	     "\t		[[-[-] matches [ or -, [z-a] matches b to y\n"
 	     , argv[0], __DATE__);
       return 1;
     }
