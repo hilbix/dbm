@@ -1,0 +1,40 @@
+A little tool to access gdbm files from shell.
+# $Header$
+# $Log$
+# Revision 1.1  2004-12-13 23:57:54  tino
+# added
+#
+
+DBM began as a quick hack just to access gdbm files from the
+commandline.
+
+It now has some batch and filter functions to be used in shell pipes,
+but it is very little tested for now.
+
+When you compile it, just ignore the error that make cannot cd into
+"tino".  That's ugly, but as it's just a quickhack no tinolib shall be
+required to compile it, and thus the current version of tinolib is not
+part of this distribution.  Also note that there currently is no
+tinolib distribution, as it's far from beeing ready.  For now it just
+comes with other of my sources.
+
+Short example what DBM can do for you, a JPG file checker:
+<PRE>
+./dbm create db.ok
+./dbm create db.fail
+find / -type f -name '*.jpg' -print |
+./dbm filter db.ok |
+./dbm filter db.fail |
+sort |
+while read -r a
+do
+        if djpeg "$a" >/dev/null
+        then
+                ./dbm insert DB/ok "$a" 1
+        else
+                ./dbm insert DB/fail "$a" 1
+        fi
+done
+</PRE>
+The "sort" is a hack to "buffer" the output, such that the database
+files are closed when the loop runs.
