@@ -1,0 +1,24 @@
+# $Header$
+#
+# This only is a Makefile stub.
+# See tino/Makefile.proto for description.
+#
+# $Log$
+# Revision 1.1  2004-07-21 20:07:34  tino
+# first version, should do
+#
+
+       PROG=dbm
+      PROGS=$(PROG)
+       OBJS=
+     LDFLAGS=-lgdbm
+#    LDFLAGS=-lefence
+#    TINOINC=tino_common.h
+#    TINOLIB=tino/lib.h
+
+##END##
+
+HERE=$(PWD)
+
+Makefile::
+	$(MAKE) -C tino tino HERE="$(HERE)"

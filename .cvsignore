@@ -1,0 +1,5 @@
+Makefile
+Makefile.md5
+dbm
+dbm_version.h
+*.tmp
