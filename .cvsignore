@@ -1,5 +1,6 @@
 Makefile
 Makefile.md5
+*.d
 dbm
 dbm_version.h
 *.tmp
