@@ -4,7 +4,10 @@
 # See tino/Makefile.proto for description.
 #
 # $Log$
-# Revision 1.2  2004-07-23 19:17:34  tino
+# Revision 1.3  2004-08-22 05:52:30  Administrator
+# Intermediate version for search functionality
+#
+# Revision 1.2  2004/07/23 19:17:34  tino
 # cosmetic changes
 #
 # Revision 1.1  2004/07/21 20:07:34  tino
@@ -13,10 +16,12 @@
        PROG=dbm
       PROGS=$(PROG)
        OBJS=
-     LDFLAGS=-lgdbm
+     LDFLAGS=
+      LDLIBS=-lgdbm
       CLEAN=
   DISTCLEAN=*.tmp
-#    LDFLAGS=-lefence
+   TINOCOPY=tino/memwild.h
+#    LDLIBS=-lefence
 #    TINOINC=tino_common.h
 #    TINOLIB=tino/lib.h
 

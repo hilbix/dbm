@@ -1,0 +1,21 @@
+$Header$
+
+Too tired to read docs?  make; ./dbm
+Want a laugh?  read RANTS
+
+This is a quick hack to access the contents of GNU-DBM files.
+
+I often use GNU DBM in PHP to store some persistent data.  However I
+was missing an utility to access this files from command line.
+
+Therefore I wrote this here and called it "dbm" - well, stupid name ;)
+Perhaps in future I might extend this to other simple database files,
+too (like berkeley-db hash maps used in sendmail).  In this case the
+file gets a prefix like "hash:" or "btree:".
+
+
+-Tino, webmaster@scylla-charybdis.com
+$Log$
+Revision 1.1  2004-08-22 05:52:30  Administrator
+Intermediate version for search functionality
+

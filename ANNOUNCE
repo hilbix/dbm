@@ -1,4 +1,3 @@
-Batch adding of keys and diagnostic dump added.
+Added "find" option (slow).
 
-GPL preamble added to source to make it more clear.
-Additional more minor updates.
+Now compiles under CygWin, too.

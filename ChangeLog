@@ -1,3 +1,8 @@
+2004-08-18  U-KOSH\Administrator  <Administrator@KOSH>
+
+	* Makefile.tino: Libraries must be given in LDLIBS (correct) not
+	in LDFLAGS (I am just too lazy) under Cygwin, sigh
+
 2004-07-23    <tino@firebird.03.softkill.net>
 
 	VERSION 0.1.1

@@ -20,7 +20,10 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * $Log$
- * Revision 1.3  2004-07-23 19:17:34  tino
+ * Revision 1.4  2004-08-22 05:52:30  Administrator
+ * Intermediate version for search functionality
+ *
+ * Revision 1.3  2004/07/23 19:17:34  tino
  * cosmetic changes
  *
  * Revision 1.2  2004/07/23 18:48:25  tino
@@ -29,6 +32,7 @@
  * Revision 1.1  2004/07/21 20:07:34  tino
  * first version, should do
  */
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -44,6 +48,7 @@
 #include <sys/stat.h>
 
 #include "dbm_version.h"
+#include "tino_memwild.h"
 
 static void
 ex(const char *s, ...)
@@ -391,6 +396,45 @@ c_batch0(int argc, char **argv)
   batcher(argc, argv, 0);
 }
 
+/* Well, there is a funny side effect, which is a feature:
+ */
+static void
+hunt(int wild, int argc, char **argv)
+{
+  unsigned long	n, i;
+  char		*end;
+
+  n	= strtoul(argv[1], &end, 0);
+  if (!end || *end)
+    ex("wrong value: %s", argv[1]);
+
+  db_open(argv[0], GDBM_READER, NULL);
+  if (!db_first())
+    exit(1);
+  for (i=0;;)
+    {
+      for (j=2; j<=argc; j++)
+	{
+	}
+      fwrite(key.dptr, key.dsize, 1, stdout);
+      if (n && i>=n || !db_next())
+	break;
+    }
+}
+
+static void
+c_find(int argc, char **argv)
+{
+  hunt(0, argc, argv);
+}
+
+static void
+c_search(int argc, char **argv)
+{
+  hunt(1, argc, argv);
+}
+
+
 struct
   {
     const char	*command;
@@ -409,9 +453,8 @@ struct
     { "get",	c_get,		1, 1	},
     { "batch",	c_batch,	1, 2	},
     { "batch0",	c_batch0,	1, 2	},
-#if 0
-    { "find",	c_find,		1, 1	},
-#endif
+    { "find",	c_find,		2, 0	},
+    { "search",	c_search,	2, 0	},
   };
 
 int
@@ -432,20 +475,29 @@ main(int argc, char **argv)
 	     "\n"
 	     "\tlist	[n]	write n keys to stdout, default 1, 0=all\n"
 	     "\tdump	[n]	diagnostic dump, default 0=all\n"
+	     "\n"
 	     "\tinsert	key [d]	insert d(ata) under key, must not exist\n"
 	     "\t		If d is missing, data is read from stdin\n"
 	     "\treplace	key [d]	insert d(ata) under key, must not exist\n"
 	     "\t		If d is missing, data is read from stdin\n"
 	     "\tdelete	key	delete entry with key\n"
+	     "\n"
 	     "\tget	key	print data under key to stdout\n"
+	     "\n"
 	     "\tbatch	i [r]	read lines for insert/update keys\n"
 	     "\t		i is the data to insert.  If r is present,\n"
 	     "\t		it is the data to use for replace.\n"
 	     "\t		If r is missing, existing keys are ignored.\n"
 	     "\tbatch0	i [r]	like batch, but keys are terminated by NUL\n"
-#if 0
-	     "\tfind	data	hunt for key (slow)\n"
-#endif
+	     "\t		(find . -type f -print0 | dbm batch0 db x y)\n"
+	     "\n"
+	     "\tfind	n data	find n keys which have exact data (slow), 0=all\n"
+	     "\t		Multiple data arguments give alternatives (=OR)\n"
+	     "\tsearch	n patrn	as before, but use patterns\n"
+	     "\n"
+	     "\tpattern help:   ?, *, [^xyz] or [a-z] are supported.  Hints:\n"
+	     *\t		[*], [?], [[] matches literal *, ?, [ respectively\n"
+	     *\t		[[-[-] matches [ or -, [z-a] matches b to y\n"
 	     , argv[0], __DATE__);
       return 1;
     }

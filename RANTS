@@ -1,0 +1,58 @@
+$Header$
+
+Please note that GNU-DBM is not very stable when it comes to irregular
+situations, like hard kill of proceses, power-outages while the
+database is not synced or parts of the database became corrupt data.
+
+What I would need is a databases as simple as GNU-DBM which is able to
+detect which part of the data became corrupt and let you read the
+unharmed data while it rejects the wrong data in case something really
+weird has happened.  To make it clear what I mean, it shall be able to
+extract all still unharmed data from a database db.bad which has been
+prepared from a good database "db.ok" as follows:
+
+(
+n=$RANDOM
+m=$RANDOM
+o=$RANDOM
+p=`expr $n + $m + $o`
+dd bs=256 if=/dev/random count=$n
+dd bs=256 if=db.ok       count=$m skip=$n
+dd bs=256 if=/dev/random count=$o
+dd bs=256 if=db.ok       skip=$p
+dd bs=$RANDOM if=/dev/zero count=123
+) > db.bad
+
+What I really would like to see is following:
+
+[ plug in USB harddrive as sda ]
+# mount /dev/sda1 /mnt
+# enter-valuable-data-in-database /mnt/db.hooray &
+# sleep 20; sync; sleep 100; sync; sleep 200
+# dd if=/dev/random of=/dev/hda count=10000
+#
+[ NOW UNPLUG THE USB DRIVE *WHILE* IT'S WRITTEN TO !!!! ]
+/mnt/db.hooray: write error
+kernel panic: cannot access hda, data lost
+# umount /mnt
+[ plug in USB harddrive again ]
+# mount /dev/sda1 /mnt
+mount: invalid partition table
+[ WELL DONE!!! ]
+# db-recover /dev/sda db.hooray
+[list of all data which is recoverable]
+
+Why do I want this?
+
+Well, you should know, there is nothing in this universe which is
+perfectly working.  Errors are normal.  And you know murphy: If there
+is something which still works even if something fails the worst, then
+a new type of error shows up.  I am bored with all the plain old
+common types of errors showing up now and then, I would like to see
+such new types of errors.  YKWIM.
+
+-Tino, webmaster@scylla-charybdis.com
+$Log$
+Revision 1.1  2004-08-22 05:52:30  Administrator
+Intermediate version for search functionality
+

@@ -3,3 +3,4 @@ Makefile.md5
 dbm
 dbm_version.h
 *.tmp
+tino_memwild.h
