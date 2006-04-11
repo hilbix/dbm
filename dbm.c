@@ -4,7 +4,7 @@
  *
  * This source shall be independent of others.  Therefor no tinolib.
  *
- * Copyright (C)2004 by Valentin Hilbig
+ * Copyright (C)2004-2006 by Valentin Hilbig
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -22,7 +22,10 @@
  * USA
  *
  * $Log$
- * Revision 1.8  2004-12-14 00:17:29  tino
+ * Revision 1.9  2006-04-11 23:26:00  tino
+ * commit for dist
+ *
+ * Revision 1.8  2004/12/14 00:17:29  tino
  * Version now shown in Usage
  *
  * Revision 1.7  2004/12/13 23:35:39  tino
@@ -244,7 +247,7 @@ dumpline(const void *ptr, size_t len, int i)
 
   mode	= 0;
   pos	= 0;
-  do
+  for (; i<len; i++)
     {
       c	= ((unsigned char *)ptr)[i];
       if (isprint(c))
@@ -279,7 +282,7 @@ dumpline(const void *ptr, size_t len, int i)
 	break;
       putchar("0123456789abcdef"[(c>>4)&15]);
       putchar("0123456789abcdef"[c&15]);
-    } while (++i<len);
+    }
   if (mode)
     putchar('"');
   return i;
@@ -552,7 +555,7 @@ c_bupd(int argc, char **argv)
  * as tino_memwildcmp is used.
  */
 static void
-hunt(int wild, int argc, char **argv)
+hunt(int match, int wild, int argc, char **argv)
 {
   unsigned long	n, i;
   char		*end;
@@ -571,7 +574,10 @@ hunt(int wild, int argc, char **argv)
     tot[j]	= strlen(argv[j]);
   do
     {
+      int	ok;
+
       data	= gdbm_fetch(db, key);
+      ok	= 0;
       for (j=2; j<=argc; j++)
 	{
 	  if (wild)
@@ -581,11 +587,15 @@ hunt(int wild, int argc, char **argv)
 	    }
 	  else if (data.dsize!=tot[j] || strncmp(argv[j], data.dptr, tot[j]))
 	    continue;
+	  ok	= 1;
+	  break;
+	}
+      if (ok==match)
+	{
 	  fwrite(key.dptr, key.dsize, 1, stdout);
 	  putchar('\n');
 	  if (n && ++i>=n)
 	    return;
-	  break;
 	}
     }
   while (db_next());
@@ -594,13 +604,25 @@ hunt(int wild, int argc, char **argv)
 static void
 c_find(int argc, char **argv)
 {
-  hunt(0, argc, argv);
+  hunt(1, 0, argc, argv);
 }
 
 static void
 c_search(int argc, char **argv)
 {
-  hunt(1, argc, argv);
+  hunt(1, 1, argc, argv);
+}
+
+static void
+c_nfind(int argc, char **argv)
+{
+  hunt(0, 0, argc, argv);
+}
+
+static void
+c_nsearch(int argc, char **argv)
+{
+  hunt(0, 1, argc, argv);
 }
 
 #if 1
@@ -641,11 +663,8 @@ c_filter(int argc, char **argv)
     {
       DP(("key %.*s", key.dsize, key.dptr));
       data	= gdbm_fetch(db, key);
-      DP(("miss %d", !data.dptr));
-      if (k==!data.dptr)
-	continue;
-      DP(("here"));
-      if (d)
+      DP(("data %*s", data.dsize, data.dptr));
+      if (d && data.dptr)
 	{
 	  DP(("check"));
 	  if ((p
@@ -654,6 +673,8 @@ c_filter(int argc, char **argv)
 	       )!=m)
 	    continue;
 	}
+      if (k==!data.dptr)
+	continue;
       DP(("put"));
       fwrite(key.dptr, key.dsize, 1, stdout);
       fputs(term, stdout);
@@ -686,6 +707,8 @@ struct
     { "filter",	c_filter,	0, 2	},
     { "find",	c_find,		2, -1	},
     { "search",	c_search,	2, -1	},
+    { "nfind",	c_nfind,	2, -1	},
+    { "nsearch",c_nsearch,	2, -1	},
   };
 
 int
@@ -738,6 +761,8 @@ main(int argc, char **argv)
 	     "\tfind	n data	find n keys which have exact data (slow), 0=all\n"
 	     "\t		Multiple data arguments give alternatives (=OR)\n"
 	     "\tsearch	n patrn	as before, but use patterns\n"
+	     "\tnfind	n data	like find, but data must not match\n"
+	     "\tnsearch	n patrn	like search, but data must not match\n"
 	     "\n"
 	     "\tpattern help:   ?, *, [^xyz] or [a-z] are supported.  Hints:\n"
 	     "\t		[*], [?], [[] matches literal *, ?, [ respectively\n"

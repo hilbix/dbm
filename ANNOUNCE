@@ -1,1 +1,4 @@
-Cosmetic changes, still nearly untested.
+Bugfix for dump and additional commands nfind and nsearch
+
+Also filter has been changed, such that
+0xx works as OR (while 1xx works as AND)

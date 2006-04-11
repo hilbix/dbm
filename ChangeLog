@@ -1,3 +1,8 @@
+2006-03-28    <tino@firebird.03.softkill.net>
+
+	* dbm.c (dumpline): dump did not work correctly on args with zero
+	length.
+
 2004-12-13    <tino@firebird.03.softkill.net>
 
 	* dbm.c (hunt): some changes migth correct errors (never checked).

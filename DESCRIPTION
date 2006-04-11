@@ -1,9 +1,14 @@
 A little tool to access gdbm files from shell.
 # $Header$
 # $Log$
-# Revision 1.1  2004-12-13 23:57:54  tino
-# added
+# Revision 1.2  2006-04-11 23:26:00  tino
+# commit for dist
 #
+# Revision 1.1  2004/12/13 23:57:54  tino
+# added
+
+<b>This here is deprecated, but I have no time to create a
+replacement</b>
 
 DBM began as a quick hack just to access gdbm files from the
 commandline.
@@ -37,4 +42,5 @@ do
 done
 </PRE>
 The "sort" is a hack to "buffer" the output, such that the database
-files are closed when the loop runs.
+files are closed when the loop runs such that the insert can be
+writer.
