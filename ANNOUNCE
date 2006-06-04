@@ -1,4 +1,5 @@
-Bugfix for dump and additional commands nfind and nsearch
+Bugfix for filter.
 
-Also filter has been changed, such that
-0xx works as OR (while 1xx works as AND)
+Previously on filter 000 a possible data match was done but then ignored (always fail).
+So the matching code introduced since 0.4 was plainly wrong, sorry!  That shall be fixed now.
+As this is really a bug I removed download of 0.4.x before this version.

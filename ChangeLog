@@ -1,3 +1,13 @@
+2006-06-04    <tino@firebird.03.softkill.net>
+
+	* dbm.c (c_filter): fixed the filter code.  It now shall really
+	work in all circumstances as expected.  From 0.4.1 to 0.4.2 I only
+	fixed the kmp=1xx case.  Now it works for kmp=0xx as expected, too
+	(this is if data key does not exist don't filter and if key exists
+	it must match as given).  If data is not present (4th arg not
+	present in contrast to empty) only the 'k' in 'kmpt' counts and mp
+	is ignored (as there you don't want to match against data).
+
 2006-03-28    <tino@firebird.03.softkill.net>
 
 	* dbm.c (dumpline): dump did not work correctly on args with zero

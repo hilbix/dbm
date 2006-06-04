@@ -22,7 +22,10 @@
  * USA
  *
  * $Log$
- * Revision 1.9  2006-04-11 23:26:00  tino
+ * Revision 1.10  2006-06-04 13:33:10  tino
+ * filter code fixed, see ChangeLog
+ *
+ * Revision 1.9  2006/04/11 23:26:00  tino
  * commit for dist
  *
  * Revision 1.8  2004/12/14 00:17:29  tino
@@ -664,17 +667,66 @@ c_filter(int argc, char **argv)
       DP(("key %.*s", key.dsize, key.dptr));
       data	= gdbm_fetch(db, key);
       DP(("data %*s", data.dsize, data.dptr));
-      if (d && data.dptr)
-	{
+      /* Argh:
+       * We have following cases:
+       * kdm vars from above, e=key exists, c=datamatch p=print (-=any)
+       * kdm ec	p
+       *
+       * 00- 0-	1
+       * 00- 1- 0
+       * 010 0-	1
+       * 010 10	1
+       * 010 11	0
+       * 011 0-	1
+       * 011 10	0
+       * 011 11	1
+       *
+       * 10- 0- 0
+       * 10- 1- 1
+       * 110 0-	0
+       * 110 10	1
+       * 110 11	0
+       * 111 0-	0
+       * 111 10	0
+       * 111 11	1
+       *
+       * Compressed:
+       * 
+       * 0-- 0-	1
+       * 1-- 0-	0
+       *
+       * 00- 1- 0
+       * 10- 1- 1
+       *
+       * -10 10	1
+       * -11 11	1
+       * -10 11	0
+       * -11 10	0
+       *
+       * Latter can be written as (with X := !x):
+       *
+       * -1x 1x	1
+       * -1x 1X	0
+       */
+      if (!data.dptr)
+	{			/* x-- 0- X	*/
+	  if (k)
+	    continue;		/* 1-- 0- 0	*/
+	}			/* 0-- 0- 1	*/
+      else if (!d)
+	{			/* x0- 1- x	*/
+	  if (!k)
+	    continue;		/* 00- 1- 0	*/
+	}			/* 10- 1- 1	*/
+      else
+	{			/* -1? 1? ?	*/
 	  DP(("check"));
 	  if ((p
-	      ? !tino_memwildcmp(data.dptr, data.dsize, d, dl)
-	      : (data.dsize==dl && !strncmp(d, data.dptr, dl))
-	       )!=m)
-	    continue;
-	}
-      if (k==!data.dptr)
-	continue;
+		? !tino_memwildcmp(data.dptr, data.dsize, d, dl)
+		: (data.dsize==dl && !strncmp(d, data.dptr, dl))
+	      )!=m)
+	   continue;		/* -1x 1X 0	*/
+	}			/* -1x 1x 1	*/
       DP(("put"));
       fwrite(key.dptr, key.dsize, 1, stdout);
       fputs(term, stdout);
