@@ -1,5 +1,9 @@
 2006-06-04    <tino@firebird.03.softkill.net>
 
+	* Makefile.tino (ADD_LDFLAGS): common problem resolved: I always
+	add libraries to LDFLAGS instead of LDLIBS which sometimes gives
+	link problems on some platforms.
+
 	* dbm.c (c_filter): fixed the filter code.  It now shall really
 	work in all circumstances as expected.  From 0.4.1 to 0.4.2 I only
 	fixed the kmp=1xx case.  Now it works for kmp=0xx as expected, too

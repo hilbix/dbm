@@ -4,7 +4,10 @@
 # See tino/Makefile.proto for description.
 #
 # $Log$
-# Revision 1.6  2004-12-14 00:14:19  tino
+# Revision 1.7  2006-06-04 13:43:41  tino
+# Makefile fixes
+#
+# Revision 1.6  2004/12/14 00:14:19  tino
 # corrected for new tinolib, such that dbm_version.h is created
 #
 # Revision 1.5  2004/11/19 05:21:33  tino
@@ -26,8 +29,8 @@
        OBJS=
        LIBS=
  ADD_CFLAGS=
-ADD_LDFLAGS=-lgdbm
- ADD_LDLIBS=
+ADD_LDFLAGS=
+ ADD_LDLIBS=-lgdbm
       CLEAN=
   DISTCLEAN=*.tmp
    TINOCOPY=tino/memwild.h
