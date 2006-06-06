@@ -22,7 +22,10 @@
  * USA
  *
  * $Log$
- * Revision 1.11  2006-06-06 00:00:21  tino
+ * Revision 1.12  2006-06-06 20:47:21  tino
+ * timeout corrected
+ *
+ * Revision 1.11  2006/06/06 00:00:21  tino
  * see Changelog
  *
  * Revision 1.10  2006/06/04 13:33:10  tino
@@ -66,6 +69,7 @@
 
 #include <gdbm.h>
 
+#include <time.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -112,20 +116,33 @@ static datum		key, data, kbuf, kbuf2;
 static void
 db_open(char *name, int mode, const char *type)
 {
-  struct stat	st;
+  struct stat		st;
+  struct timespec	hold;
+  time_t		now=0;
 
   if (!type)
     type	= "open";
   if (mode!=GDBM_WRCREAT && lstat(name, &st))
     ex("database missing: %s", name);
-  if ((db=gdbm_open(name, BUFSIZ, mode, 0775, fatal_func))==0)
+  while ((db=gdbm_open(name, BUFSIZ, mode, 0775, fatal_func))==0)
     {
       if (timeout && (gdbm_errno==GDBM_CANT_BE_READER || gdbm_errno==GDBM_CANT_BE_WRITER))
 	{
-	  fprintf(stderr, "sleeping: %s: %s\n", type, gdbm_strerror(gdbm_errno));
-	  sleep(1);
-	  if (timeout>0)
-	    timeout--;
+	  if (!now)
+	    {
+	      time(&now);
+	      fprintf(stderr, "sleeping: %s: %s\n", type, gdbm_strerror(gdbm_errno));
+	      hold.tv_sec	= 0;
+	      hold.tv_nsec	= 0;
+	      continue;
+	    }
+	  else if (time(NULL)-now<=timeout)
+	    {
+	      if (hold.tv_nsec<500000000l)
+		hold.tv_nsec	+= 1000000l;
+	      nanosleep(&hold, NULL);
+	      continue;
+	    }
 	}
       ex("cannot %s db: %s", type, name);
     }

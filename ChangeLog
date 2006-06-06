@@ -5,6 +5,8 @@
 	(c_alter): added
 	(batcher_new, c_nbatch, c_nbatch0): added
 	(main): usage corrected, batch does not ignore
+	(db_open): corrected the timeout function.  Shall recover as quick
+	as possible from the stale situation.
 
 2006-06-04    <tino@firebird.03.softkill.net>
 
