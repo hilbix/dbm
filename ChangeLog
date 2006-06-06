@@ -1,3 +1,11 @@
+2006-06-06    <tino@firebird.03.softkill.net>
+
+	* dbm.c (c_delete): added delete of key only if data matches
+	(db_open, main): timeout added
+	(c_alter): added
+	(batcher_new, c_nbatch, c_nbatch0): added
+	(main): usage corrected, batch does not ignore
+
 2006-06-04    <tino@firebird.03.softkill.net>
 
 	* Makefile.tino (ADD_LDFLAGS): common problem resolved: I always

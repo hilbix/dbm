@@ -22,7 +22,10 @@
  * USA
  *
  * $Log$
- * Revision 1.10  2006-06-04 13:33:10  tino
+ * Revision 1.11  2006-06-06 00:00:21  tino
+ * see Changelog
+ *
+ * Revision 1.10  2006/06/04 13:33:10  tino
  * filter code fixed, see ChangeLog
  *
  * Revision 1.9  2006/04/11 23:26:00  tino
@@ -103,6 +106,7 @@ fatal_func(const char *s)
 }
 
 static GDBM_FILE	db;
+static int		timeout;
 static datum		key, data, kbuf, kbuf2;
 
 static void
@@ -115,7 +119,16 @@ db_open(char *name, int mode, const char *type)
   if (mode!=GDBM_WRCREAT && lstat(name, &st))
     ex("database missing: %s", name);
   if ((db=gdbm_open(name, BUFSIZ, mode, 0775, fatal_func))==0)
-    ex("cannot %s db: %s", type, name);
+    {
+      if (timeout && (gdbm_errno==GDBM_CANT_BE_READER || gdbm_errno==GDBM_CANT_BE_WRITER))
+	{
+	  fprintf(stderr, "sleeping: %s: %s\n", type, gdbm_strerror(gdbm_errno));
+	  sleep(1);
+	  if (timeout>0)
+	    timeout--;
+	}
+      ex("cannot %s db: %s", type, name);
+    }
 }
 
 static int
@@ -181,9 +194,10 @@ db_data(int argc, char **argv)
 static void
 db_store(int argc, char **argv, int flag, int check)
 {
+  db_data(argc-2, argv+2);
+
   db_open(argv[0], GDBM_WRITER, NULL);
   db_key(argv[1]);
-  db_data(argc-2, argv+2);
   if (check && !gdbm_exists(db, key))
     ex("key does not exist: %s", argv[0]);
   if (gdbm_store(db, key, data, flag))
@@ -350,10 +364,32 @@ c_update(int argc, char **argv)
 }
 
 static void
+c_alter(int argc, char **argv)
+{
+  db_data(argc-3, argv+3);
+
+  db_open(argv[0], GDBM_WRITER, NULL);
+  db_key(argv[1]);
+  data	= gdbm_fetch(db, key);
+  if (!data.dptr)
+    ex("key does not exist: %s", argv[0]);
+  if (data.dsize!=strlen(argv[2]) || memcmp(data.dptr,argv[2],data.dsize))
+    ex("key data mismatch");
+  if (gdbm_store(db, key, data, GDBM_REPLACE))
+    ex("cannot store %s into %s", argv[1], argv[0]);
+}
+
+static void
 c_delete(int argc, char **argv)
 {
   db_open(argv[0], GDBM_WRITER, NULL);
   db_key(argv[1]);
+  if (argc==2)
+    {
+      data	= gdbm_fetch(db, key);
+      if (data.dptr && (data.dsize!=strlen(argv[2]) || memcmp(data.dptr,argv[2],data.dsize)))
+	ex("key data mismatch");
+    }
   if (gdbm_delete(db, key))
     ex("could not delete '%s': %s", argv[1], argv[0]);
 }
@@ -372,12 +408,14 @@ c_get(int argc, char **argv)
 static void
 batch_store(int argc, char **argv)
 {
-  db_data(0, argv);
+  if (!db)
+    db_open(argv[0], GDBM_WRITER, NULL);
+  db_data(0, argv+1);
   if (!gdbm_store(db, key, data, GDBM_INSERT))
     return;
-  if (argc)
+  if (argc>1)
     {
-      db_data(0, argv+1);
+      db_data(0, argv+2);
       if (!gdbm_store(db, key, data, GDBM_REPLACE))
 	return;
     }
@@ -412,9 +450,6 @@ batcher(int argc, char **argv, int term)
 {
   int	c;
 
-  db_open(argv[0], GDBM_WRITER, NULL);
-  argc--;
-  argv++;
   do
     {
       c	= read_key_term_c(term);
@@ -432,6 +467,27 @@ static void
 c_batch0(int argc, char **argv)
 {
   batcher(argc, argv, 0);
+}
+
+static void
+batcher_new(int argc, char **argv, int term)
+{
+  int	c;
+
+  while ((c=read_key_term_c(term))!=EOF)
+    batch_store(argc, argv);
+}  
+
+static void
+c_nbatch(int argc, char **argv)
+{
+  batcher_new(argc, argv, '\n');
+}
+
+static void
+c_nbatch0(int argc, char **argv)
+{
+  batcher_new(argc, argv, 0);
 }
 
 static int
@@ -499,10 +555,11 @@ c_bdel(int argc, char **argv)
   const char	*term;
   int		c;
 
-  db_open(argv[0], GDBM_WRITER, NULL);
   term	= (argc ? argv[1] : "");
   while ((c=read_key_term_s(term))!=EOF || key.dsize)
     {
+      if (!db)
+	db_open(argv[0], GDBM_WRITER, NULL);
       if (gdbm_delete(db, key))
         ex("could not delete '%s': %s", argv[1], argv[0]);
       if (c==EOF)
@@ -516,7 +573,6 @@ batch_read(int argc, char **argv, int flag, int check)
   const char	*term, *eol;
   int		i, c;
 
-  db_open(argv[0], GDBM_WRITER, NULL);
   term	= (argc>0 ? argv[1] : "");
   eol	= (argc>1 ? argv[2] : "");
   if (!*eol)
@@ -526,6 +582,8 @@ batch_read(int argc, char **argv, int flag, int check)
       data.dsize	= 0;
       if (c!=EOF)
         c	= read_data_term_s(eol);
+      if (!db)
+	db_open(argv[0], GDBM_WRITER, NULL);
       if (check && !gdbm_exists(db, key))
         ex("key/data pair %d has missing key", i);
       if (gdbm_store(db, key, data, flag))
@@ -651,7 +709,6 @@ c_filter(int argc, char **argv)
   const char	*term, *d;
   int		k, m, p, i, c, dl;
 
-  db_open(argv[0], GDBM_READER, NULL);
   term	= (argc>0 ? argv[1] : "");
   d	= (argc>1 ? argv[2] : NULL);
   dl	= 0;
@@ -664,6 +721,8 @@ c_filter(int argc, char **argv)
     term	= "\n";
   for (i=0; !feof(stdout) && ((c=read_key_term_s(term))!=EOF || key.dsize); i++)
     {
+      if (!db)
+	db_open(argv[0], GDBM_READER, NULL);
       DP(("key %.*s", key.dsize, key.dptr));
       data	= gdbm_fetch(db, key);
       DP(("data %*s", data.dsize, data.dptr));
@@ -748,10 +807,13 @@ struct
     { "insert",	c_insert,	1, 2	},
     { "replace",c_replace,	1, 2	},
     { "update",	c_update,	1, 2	},
-    { "delete",	c_delete,	1, 1	},
+    { "alter",	c_alter,	2, 3	},
+    { "delete",	c_delete,	1, 2	},
     { "get",	c_get,		1, 1	},
     { "batch",	c_batch,	1, 2	},
     { "batch0",	c_batch0,	1, 2	},
+    { "nbatch",	c_nbatch,	1, 2	},
+    { "nbatch0", c_nbatch0,	1, 2	},
     { "bdel",	c_bdel,		0, 1	},
     { "bins",	c_bins,		0, 2	},
     { "brep",	c_brep,		0, 2	},
@@ -767,11 +829,18 @@ int
 main(int argc, char **argv)
 {
   int	i;
+  char	*arg0;
 
+  arg0	= argv[0];
+
+  if (argc>1 && argv[1][0]=='-' && argv[1][1]=='t')	/* actually a hack	*/
+    argc--, timeout=atoi(*++argv+2);			/* set timeout	*/
   if (argc<2)
     {
-      printf("Usage: %s action gdbm-file [args...]\n"
+      printf("Usage: %s [-tSEC] action gdbm-file [args...]\n"
 	     "\tVersion %s compiled %s\n"
+	     "\n"
+	     "\t-tSEC	timeout in seconds, -1=unlimited, 0=none (default)\n"
 	     "\n"
 	     "\tAction	Args	Description:\n"
 	     "\t-------	-------	------------\n"
@@ -786,16 +855,18 @@ main(int argc, char **argv)
 	     "\t		If d is missing, data is read from stdin\n"
 	     "\tupdate	key [d]	as before, but key must exist.\n"
 	     "\treplace	key [d]	as before, but replace (insert+update)\n"
-	     "\tdelete	key	delete entry with key given\n"
+	     "\tdelete	key [d]	delete entry with key given and data matches\n"
+	     "\talter	k o [d]	update key with original(o) data\n"
 	     "\n"
 	     "\tget	key	print data under key to stdout\n"
 	     "\n"
 	     "\tbatch	i [r]	read lines for insert/update keys\n"
 	     "\t		i is the data to insert.  If r is present,\n"
 	     "\t		it is the data to use for replace.\n"
-	     "\t		If r is missing, existing keys are ignored.\n"
 	     "\tbatch0	i [r]	like batch, but keys are terminated by NUL\n"
 	     "\t		(find . -type f -print0 | dbm batch0 db x y)\n"
+	     "\tnbatch	i [r]	like batch, but requires line terminator\n"
+	     "\tnbatch0	i [r]	like batch0, but requires line terminator 0\n"
 	     "\n"
 	     "\tbins	[s [t]]	insert key/data read from stdin\n"
 	     "\t		s is the key terminator, default ''=blanks.\n"
@@ -819,7 +890,7 @@ main(int argc, char **argv)
 	     "\tpattern help:   ?, *, [^xyz] or [a-z] are supported.  Hints:\n"
 	     "\t		[*], [?], [[] matches literal *, ?, [ respectively\n"
 	     "\t		[[-[-] matches [ or -, [z-a] matches b to y\n"
-	     , argv[0], DBM_VERSION, __DATE__);
+	     , arg0, DBM_VERSION, __DATE__);
       return 1;
     }
   for (i=sizeof actions/sizeof *actions; --i>=0; )
