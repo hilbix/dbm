@@ -27,7 +27,7 @@ Also timeout and delayed open added.  This allows more easy pipes:
 find . |
 ./dbm filter DB |
 sort |
-./dbm batch DB add
+./dbm nbatch DB add
 </pre>
 The trick is, that the sort eats all data until the first dbm is
 finished.  The second one delays the open until the first data
