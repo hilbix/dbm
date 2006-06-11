@@ -1,42 +1,22 @@
-All features nearly untested as always.
+New feature nearly untested as always.
 
-- Alter command added.
-- Timeout and delayed database open added
-- delete command now can check against data in key
-- nbatch and nbatch0 added
+Better return value and messaging added.
 
-You can now delete keys if the data is matching.
-So if the data is not matching, no delete happens.
+Return value now is
+<ul>
+<li> 0=ok
+<li> 1=key missing or database empty
+<li> 2=key exists or cannot store
+<li> 10=general other error
+<li> 255=timeout
+</ul>
 
-Also "alter" command added.  It works like "update"
-but it does not update if there is no match of th old data.
+The main reason for this change is "dbm delete" where now I can
+distinguish if the key was deleted (0) or the key was missing (1) or
+the key exists but has the wrong data (2), there was a retryable
+timeout (-1=255).
 
-Example:
-<pre>
-./dbm create test.db
-./dbm insert test.db a b
-./dbm alter  test.db a b c
-./dbm alter  test.db a b c || echo "must fail now"
-./dbm delete test.db a b || echo "must fail"
-./dbm delete test.db a c
-rm test.db
-</pre>
-
-Also timeout and delayed open added.  This allows more easy pipes:
-<pre>
-find . |
-./dbm filter DB |
-sort |
-./dbm nbatch DB add
-</pre>
-The trick is, that the sort eats all data until the first dbm is
-finished.  The second one delays the open until the first data
-arrives.
-
-The new commands nbatch and nbatch0 repairs "the empty key" phenomenon
-in case you use dbm in pipe situations.  However it ignores the line
-if the line terminator is missing.  This is helpful in situations
-where you kill some process, so lines which are not complete are not
-processed at all.  However, in situations where the last line
-terminator might be missing you must use the command "batch" and
-"batch0".
+There now is only one case where the database does not return true but
+print2 no error to stderr: <tt>dbm get</tt> where the key is missing.
+This is you can still `dbm get DB something` without stderr clutter,
+and it will stay this way.

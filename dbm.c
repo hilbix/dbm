@@ -22,7 +22,10 @@
  * USA
  *
  * $Log$
- * Revision 1.12  2006-06-06 20:47:21  tino
+ * Revision 1.13  2006-06-11 01:22:11  tino
+ * Better return values
+ *
+ * Revision 1.12  2006/06/06 20:47:21  tino
  * timeout corrected
  *
  * Revision 1.11  2006/06/06 00:00:21  tino
@@ -78,7 +81,7 @@
 #include "tino_memwild.h"
 
 static void
-ex(const char *s, ...)
+ex(int nr, const char *s, ...)
 {
   va_list	list;
   int		e;
@@ -89,7 +92,7 @@ ex(const char *s, ...)
   vfprintf(stderr, s, list);
   va_end(list);
   fprintf(stderr, ": %s (%s)\n", strerror(e), gdbm_strerror(gdbm_errno));
-  exit(-1);
+  exit(nr ? nr : 10);
 }
 
 static void *
@@ -99,14 +102,14 @@ my_realloc(void *ptr, size_t len)
 
   tmp	= (ptr ? realloc(ptr, len) : malloc(len));
   if (!tmp)
-    ex("out of memory");
+    ex(0, "out of memory");
   return tmp;
 }
 
 static void
 fatal_func(const char *s)
 {
-  ex("gdbm fatal: %s\n", s);
+  ex(0, "gdbm fatal: %s\n", s);
 }
 
 static GDBM_FILE	db;
@@ -123,28 +126,32 @@ db_open(char *name, int mode, const char *type)
   if (!type)
     type	= "open";
   if (mode!=GDBM_WRCREAT && lstat(name, &st))
-    ex("database missing: %s", name);
+    ex(0, "database missing: %s", name);
   while ((db=gdbm_open(name, BUFSIZ, mode, 0775, fatal_func))==0)
     {
-      if (timeout && (gdbm_errno==GDBM_CANT_BE_READER || gdbm_errno==GDBM_CANT_BE_WRITER))
+      if (gdbm_errno==GDBM_CANT_BE_READER || gdbm_errno==GDBM_CANT_BE_WRITER)
 	{
-	  if (!now)
+	  if (timeout)
 	    {
-	      time(&now);
-	      fprintf(stderr, "sleeping: %s: %s\n", type, gdbm_strerror(gdbm_errno));
-	      hold.tv_sec	= 0;
-	      hold.tv_nsec	= 0;
-	      continue;
+	      if (!now)
+		{
+		  time(&now);
+		  fprintf(stderr, "sleeping: %s: %s\n", type, gdbm_strerror(gdbm_errno));
+		  hold.tv_sec	= 0;
+		  hold.tv_nsec	= 0;
+		  continue;
+		}
+	      if (timeout<0 || time(NULL)-now<=timeout)
+		{
+		  if (hold.tv_nsec<500000000l)
+		    hold.tv_nsec	+= 1000000l;
+		  nanosleep(&hold, NULL);
+		  continue;
+		}
 	    }
-	  else if (time(NULL)-now<=timeout)
-	    {
-	      if (hold.tv_nsec<500000000l)
-		hold.tv_nsec	+= 1000000l;
-	      nanosleep(&hold, NULL);
-	      continue;
-	    }
+	  ex(-1, "timeout %s db: %s", type, name);
 	}
-      ex("cannot %s db: %s", type, name);
+      ex(0, "cannot %s db: %s", type, name);
     }
 }
 
@@ -186,7 +193,7 @@ db_data(int argc, char **argv)
   data.dptr	= 0;
   data.dsize	= 0;
   if (argc>0)
-    ex("too many parameters");
+    ex(0, "too many parameters");
   if (argc==0)
     {
       data.dptr	= argv[0];
@@ -202,7 +209,7 @@ db_data(int argc, char **argv)
 	  data.dptr	= my_realloc(data.dptr, m);
 	  n = fread(((char *)data.dptr)+data.dsize, 1, m-data.dsize, stdin);
 	  if (n<0 || ferror(stdin))
-	    ex("read error");
+	    ex(0, "read error");
 	  data.dsize	+= n;
 	} while (!feof(stdin));
     }
@@ -216,9 +223,9 @@ db_store(int argc, char **argv, int flag, int check)
   db_open(argv[0], GDBM_WRITER, NULL);
   db_key(argv[1]);
   if (check && !gdbm_exists(db, key))
-    ex("key does not exist: %s", argv[0]);
+    ex(2, "key does not exist: %s", argv[0]);
   if (gdbm_store(db, key, data, flag))
-    ex("cannot store %s into %s", argv[1], argv[0]);
+    ex(2, "cannot store %s into %s", argv[1], argv[0]);
 }
 
 static void
@@ -227,9 +234,9 @@ c_create(int argc, char **argv)
   struct stat	st;
 
   if (!lstat(argv[0], &st))
-    ex("already exists: %s", argv[0]);
+    ex(0, "already exists: %s", argv[0]);
   if (errno!=ENOENT)
-    ex("not supported error return: %s", argv[0]);
+    ex(0, "not supported error return: %s", argv[0]);
   db_open(argv[0], GDBM_WRCREAT, "create");
 }
 
@@ -238,9 +245,9 @@ c_kill(int argc, char **argv)
 {
   db_open(argv[0], GDBM_WRITER, NULL);
   if (db_first())
-    ex("database not empty: %s", argv[0]);
+    ex(0, "database not empty: %s", argv[0]);
   if (unlink(argv[0]))
-    ex("cannot unlink: %s", argv[0]);
+    ex(0, "cannot unlink: %s", argv[0]);
 }
 
 static void
@@ -248,7 +255,7 @@ c_reorg(int argc, char **argv)
 {
   db_open(argv[0], GDBM_WRITER, NULL);
   if (gdbm_reorganize(db))
-    ex("error reorganizing: %s", argv[0]);
+    ex(0, "error reorganizing: %s", argv[0]);
 }
 
 static void
@@ -262,11 +269,11 @@ c_list(int argc, char **argv)
     {
       n	= strtoul(argv[1], &end, 0);
       if (!end || *end)
-	ex("wrong value: %s", argv[1]);
+	ex(0, "wrong value: %s", argv[1]);
     }
   db_open(argv[0], GDBM_READER, NULL);
   if (!db_first())
-    exit(1);
+    ex(1, "empty database");
   for (i=0;
        fwrite(key.dptr, key.dsize, 1, stdout), (!n || ++i<n) && db_next();
        putchar('\n'));
@@ -347,11 +354,11 @@ c_dump(int argc, char **argv)
     {
       n	= strtoul(argv[1], &end, 0);
       if (!end || *end)
-	ex("wrong value: %s", argv[1]);
+	ex(0, "wrong value: %s", argv[1]);
     }
   db_open(argv[0], GDBM_READER, NULL);
   if (!db_first())
-    exit(1);
+    ex(1, "empty database");
   for (i=0;; )
     {
       data	= gdbm_fetch(db, key);
@@ -389,11 +396,11 @@ c_alter(int argc, char **argv)
   db_key(argv[1]);
   data	= gdbm_fetch(db, key);
   if (!data.dptr)
-    ex("key does not exist: %s", argv[0]);
+    ex(1, "key does not exist: %s", argv[0]);
   if (data.dsize!=strlen(argv[2]) || memcmp(data.dptr,argv[2],data.dsize))
-    ex("key data mismatch");
+    ex(2, "key data mismatch");
   if (gdbm_store(db, key, data, GDBM_REPLACE))
-    ex("cannot store %s into %s", argv[1], argv[0]);
+    ex(2, "cannot store %s into %s", argv[1], argv[0]);
 }
 
 static void
@@ -405,10 +412,10 @@ c_delete(int argc, char **argv)
     {
       data	= gdbm_fetch(db, key);
       if (data.dptr && (data.dsize!=strlen(argv[2]) || memcmp(data.dptr,argv[2],data.dsize)))
-	ex("key data mismatch");
+	ex(2, "key data mismatch");
     }
   if (gdbm_delete(db, key))
-    ex("could not delete '%s': %s", argv[1], argv[0]);
+    ex(1, "could not delete '%s': %s", argv[1], argv[0]);
 }
 
 static void
@@ -436,7 +443,7 @@ batch_store(int argc, char **argv)
       if (!gdbm_store(db, key, data, GDBM_REPLACE))
 	return;
     }
-  ex("cannot store %s into %s", argv[1], argv[0]);
+  ex(2, "cannot store %s into %s", argv[1], argv[0]);
 }
 
 static __inline__ void
@@ -578,7 +585,7 @@ c_bdel(int argc, char **argv)
       if (!db)
 	db_open(argv[0], GDBM_WRITER, NULL);
       if (gdbm_delete(db, key))
-        ex("could not delete '%s': %s", argv[1], argv[0]);
+        ex(1, "could not delete '%s': %s", argv[1], argv[0]);
       if (c==EOF)
 	break;
     }
@@ -602,9 +609,9 @@ batch_read(int argc, char **argv, int flag, int check)
       if (!db)
 	db_open(argv[0], GDBM_WRITER, NULL);
       if (check && !gdbm_exists(db, key))
-        ex("key/data pair %d has missing key", i);
+        ex(1, "key/data pair %d has missing key", i);
       if (gdbm_store(db, key, data, flag))
-        ex("cannot store key/data pair %d", i);
+        ex(2, "cannot store key/data pair %d", i);
       if (c==EOF)
         break;
     }
@@ -642,11 +649,11 @@ hunt(int match, int wild, int argc, char **argv)
 
   n	= strtoul(argv[1], &end, 0);
   if (!end || *end)
-    ex("wrong value: %s", argv[1]);
+    ex(0, "wrong value: %s", argv[1]);
 
   db_open(argv[0], GDBM_READER, NULL);
   if (!db_first())
-    exit(1);
+    ex(1, "empty database");
   i	= 0;
   for (j=2; j<=argc; j++)
     tot[j]	= strlen(argv[j]);
@@ -856,6 +863,7 @@ main(int argc, char **argv)
     {
       printf("Usage: %s [-tSEC] action gdbm-file [args...]\n"
 	     "\tVersion %s compiled %s\n"
+	     "\treturn 0=ok 1=missing_key 2=no_store 10=other 255=locked/timeout\n"
 	     "\n"
 	     "\t-tSEC	timeout in seconds, -1=unlimited, 0=none (default)\n"
 	     "\n"
@@ -916,16 +924,16 @@ main(int argc, char **argv)
 	argc	-= 3;
 	argv	+= 2;
 	if (argc<0)
-	  ex("missing database name for command '%s'", actions[i].command);
+	  ex(0, "missing database name for command '%s'", actions[i].command);
 	if (argc<actions[i].minargs ||
 	    (actions[i].maxargs!=-1 && argc>actions[i].maxargs))
-	  ex("wrong number of parameters for command '%s': %d (%d-%d)",
+	  ex(0, "wrong number of parameters for command '%s': %d (%d-%d)",
 	     actions[i].command, argc, actions[i].minargs, actions[i].maxargs
 	     );
 	actions[i].fn(argc, argv);
 	db_close();
 	return 0;
       }
-  ex("unknown command: '%s'", argv[1]);
+  ex(0, "unknown command: '%s'", argv[1]);
   return 0;
 }
