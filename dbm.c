@@ -22,7 +22,10 @@
  * USA
  *
  * $Log$
- * Revision 1.13  2006-06-11 01:22:11  tino
+ * Revision 1.14  2006-07-15 14:51:54  tino
+ * alter command corrected
+ *
+ * Revision 1.13  2006/06/11 01:22:11  tino
  * Better return values
  *
  * Revision 1.12  2006/06/06 20:47:21  tino
@@ -399,6 +402,7 @@ c_alter(int argc, char **argv)
     ex(1, "key does not exist: %s", argv[0]);
   if (data.dsize!=strlen(argv[2]) || memcmp(data.dptr,argv[2],data.dsize))
     ex(2, "key data mismatch");
+  db_data(argc-3, argv+3);
   if (gdbm_store(db, key, data, GDBM_REPLACE))
     ex(2, "cannot store %s into %s", argv[1], argv[0]);
 }
@@ -878,9 +882,10 @@ main(int argc, char **argv)
 	     "\n"
 	     "\tinsert	key [d]	insert d(ata) under key, must not exist\n"
 	     "\t		If d is missing, data is read from stdin\n"
-	     "\tupdate	key [d]	as before, but key must exist.\n"
+	     "\tupdate	key [d]	update existing key.\n"
 	     "\treplace	key [d]	as before, but replace (insert+update)\n"
-	     "\tdelete	key [d]	delete entry with key given and data matches\n"
+	     "\tdelete	key [d]	delete key entry, data must match if given\n"
+	     "\tupdate	key [d]	as before, but key must exist.\n"
 	     "\talter	k o [d]	update key with original(o) data\n"
 	     "\n"
 	     "\tget	key	print data under key to stdout\n"
