@@ -22,7 +22,10 @@
  * USA
  *
  * $Log$
- * Revision 1.14  2006-07-15 14:51:54  tino
+ * Revision 1.15  2006-07-22 00:49:04  tino
+ * See ChangeLog
+ *
+ * Revision 1.14  2006/07/15 14:51:54  tino
  * alter command corrected
  *
  * Revision 1.13  2006/06/11 01:22:11  tino
@@ -118,6 +121,17 @@ fatal_func(const char *s)
 static GDBM_FILE	db;
 static int		timeout;
 static datum		key, data, kbuf, kbuf2;
+static int		data_alloc;
+
+static void
+data_free(void)
+{
+  if (data_alloc && data.dptr)
+    free(data.dptr);
+  data_alloc	= 0;
+  data.dptr	= 0;
+  data.dsize	= 0;
+}
 
 static void
 db_open(char *name, int mode, const char *type)
@@ -168,7 +182,12 @@ db_first(void)
 static int
 db_next(void)
 {
-  key	= gdbm_nextkey(db, key);
+  void	*old;
+  if ((old=key.dptr)!=0)
+    {
+      key	= gdbm_nextkey(db, key);
+      free(old);	/* we came from db_first()	*/
+    }
   return key.dptr!=0;
 }
 
@@ -191,10 +210,17 @@ db_key(char *s)
 }
 
 static void
+db_get(void)
+{
+  data_free();
+  data	= gdbm_fetch(db, key);
+  data_alloc	= 1;
+}
+
+static void
 db_data(int argc, char **argv)
 {
-  data.dptr	= 0;
-  data.dsize	= 0;
+  data_free();
   if (argc>0)
     ex(0, "too many parameters");
   if (argc==0)
@@ -204,6 +230,7 @@ db_data(int argc, char **argv)
     }
   else
     {
+      data_alloc	= 1;
       do
 	{
 	  int	n, m;
@@ -265,10 +292,11 @@ static void
 c_list(int argc, char **argv)
 {
   unsigned long	n, i;
-  char		*end;
+  char		*end, *sep;
+  size_t	seplen;
 
   n	= 1;
-  if (argc)
+  if (argc>0)
     {
       n	= strtoul(argv[1], &end, 0);
       if (!end || *end)
@@ -277,9 +305,11 @@ c_list(int argc, char **argv)
   db_open(argv[0], GDBM_READER, NULL);
   if (!db_first())
     ex(1, "empty database");
+  sep		= argc>1 ? argv[2] : "\n";
+  seplen	= *sep ? strlen(sep) : 1;
   for (i=0;
        fwrite(key.dptr, key.dsize, 1, stdout), (!n || ++i<n) && db_next();
-       putchar('\n'));
+       fwrite(sep, seplen, 1, stdout));
 }
 
 #define	DUMPWIDTH	65	/* 32 for HEX, 64 for ascii	*/
@@ -364,7 +394,7 @@ c_dump(int argc, char **argv)
     ex(1, "empty database");
   for (i=0;; )
     {
-      data	= gdbm_fetch(db, key);
+      db_get();
       dump(key.dptr,  key.dsize, "key");
       dump(data.dptr, data.dsize, "  data");
       if ((n && ++i>=n) || !db_next())
@@ -397,7 +427,7 @@ c_alter(int argc, char **argv)
 
   db_open(argv[0], GDBM_WRITER, NULL);
   db_key(argv[1]);
-  data	= gdbm_fetch(db, key);
+  db_get();
   if (!data.dptr)
     ex(1, "key does not exist: %s", argv[0]);
   if (data.dsize!=strlen(argv[2]) || memcmp(data.dptr,argv[2],data.dsize))
@@ -414,7 +444,7 @@ c_delete(int argc, char **argv)
   db_key(argv[1]);
   if (argc==2)
     {
-      data	= gdbm_fetch(db, key);
+      db_get();
       if (data.dptr && (data.dsize!=strlen(argv[2]) || memcmp(data.dptr,argv[2],data.dsize)))
 	ex(2, "key data mismatch");
     }
@@ -427,7 +457,7 @@ c_get(int argc, char **argv)
 {
   db_open(argv[0], GDBM_READER, NULL);
   db_key(argv[1]);
-  data	= gdbm_fetch(db, key);
+  db_get();
   if (!data.dptr)
     exit(1);
   fwrite(data.dptr, data.dsize, 1, stdout);
@@ -438,7 +468,7 @@ batch_store(int argc, char **argv)
 {
   if (!db)
     db_open(argv[0], GDBM_WRITER, NULL);
-  db_data(0, argv+1);
+  db_data(0, argv+1);	/* does not read from stdin	*/
   if (!gdbm_store(db, key, data, GDBM_INSERT))
     return;
   if (argc>1)
@@ -543,6 +573,9 @@ read_key_term_s(const char *term)
         }
       kbuf_set(i, c);
     }
+#if 0
+  kbuf_set(i, 0);	/* just in case	*/
+#endif
   key		= kbuf;
   key.dsize	= i;
   return c;
@@ -553,6 +586,9 @@ read_data_term_s(const char *term)
 {
   datum	tmp1, tmp2;
   int	c;
+
+  if (data_alloc)	/* shall never happen	*/
+    data_free();
 
   /* ugly hack: switch to kbuf2
    */
@@ -665,7 +701,7 @@ hunt(int match, int wild, int argc, char **argv)
     {
       int	ok;
 
-      data	= gdbm_fetch(db, key);
+      db_get();
       ok	= 0;
       for (j=2; j<=argc; j++)
 	{
@@ -686,8 +722,7 @@ hunt(int match, int wild, int argc, char **argv)
 	  if (n && ++i>=n)
 	    return;
 	}
-    }
-  while (db_next());
+    } while (db_next());
 }
 
 static void
@@ -712,6 +747,50 @@ static void
 c_nsearch(int argc, char **argv)
 {
   hunt(0, 1, argc, argv);
+}
+
+static void
+dobget(char **argv, char *sep)
+{
+  static int seplen;	/* AARGH, ugly hack	*/
+
+  if (!db)
+    db_open(argv[0], GDBM_READER, NULL);
+  db_get();
+  if (!data.dptr)
+    ex(1, "key does not exist: %.*s", (int)key.dsize, key.dptr);
+  if (sep)
+    {
+      fwrite(key.dptr, key.dsize, 1, stdout);
+      if (!seplen)
+	seplen	= *sep ? strlen(sep) : 1;
+      fwrite(sep, seplen, 1, stdout);
+    }
+  fwrite(data.dptr, data.dsize, 1, stdout);
+  putchar('\n');
+}
+
+static void
+c_bget(int argc, char **argv)
+{
+  int	c;
+  char	*term, *sep;
+
+  term	= (argc>0 ? argv[1] : "");
+  sep	= (argc>1 ? argv[2] : 0);
+  while ((c=read_key_term_s(term))!=EOF)
+    dobget(argv, sep);
+}
+
+static void
+c_bget0(int argc, char **argv)
+{
+  int	c;
+  char	*sep;
+
+  sep	= (argc>0 ? argv[1] : 0);
+  while ((c=read_key_term_c(0))!=EOF)
+    dobget(argv, sep);
 }
 
 #if 1
@@ -752,7 +831,7 @@ c_filter(int argc, char **argv)
       if (!db)
 	db_open(argv[0], GDBM_READER, NULL);
       DP(("key %.*s", key.dsize, key.dptr));
-      data	= gdbm_fetch(db, key);
+      db_get();
       DP(("data %*s", data.dsize, data.dptr));
       /* Argh:
        * We have following cases:
@@ -830,7 +909,7 @@ struct
     { "create",	c_create,	0, 0 	},
     { "kill",	c_kill,		0, 0	},
     { "reorg",	c_reorg,	0, 0	},
-    { "list",	c_list,		0, 1	},
+    { "list",	c_list,		0, 2	},
     { "dump",	c_dump,		0, 1	},
     { "insert",	c_insert,	1, 2	},
     { "replace",c_replace,	1, 2	},
@@ -838,6 +917,8 @@ struct
     { "alter",	c_alter,	2, 3	},
     { "delete",	c_delete,	1, 2	},
     { "get",	c_get,		1, 1	},
+    { "bget",	c_bget,		0, 2	},
+    { "bget0",	c_bget0,	0, 1	},
     { "batch",	c_batch,	1, 2	},
     { "batch0",	c_batch0,	1, 2	},
     { "nbatch",	c_nbatch,	1, 2	},
@@ -877,7 +958,8 @@ main(int argc, char **argv)
 	     "\tkill	-	erase DBM file if empty\n"
 	     "\treorg	-	reorganize DBM\n"
 	     "\n"
-	     "\tlist	[n]	write n keys to stdout, default 1, 0=all\n"
+	     "\tlist	[n [p]]	write n keys to stdout, default 1, 0=all\n"
+	     "\t		p is the line terminator, default LF, '' for NUL\n"
 	     "\tdump	[n]	diagnostic dump, default 0=all\n"
 	     "\n"
 	     "\tinsert	key [d]	insert d(ata) under key, must not exist\n"
@@ -898,8 +980,11 @@ main(int argc, char **argv)
 	     "\tnbatch	i [r]	like batch, but requires line terminator\n"
 	     "\tnbatch0	i [r]	like batch0, but requires line terminator 0\n"
 	     "\n"
-	     "\tbins	[s [t]]	insert key/data read from stdin\n"
+	     "\tbget	[s [p]]	batch get, read keys from stdin and output data.\n"
 	     "\t		s is the key terminator, default ''=blanks.\n"
+	     "\t		if p is given, print 'key p data' instead of data.\n"
+	     "\tbget0	[p]	like bget where s is NUL.\n"
+	     "\tbins	[s [t]]	insert key/data read from stdin\n"
 	     "\t		t is the data terminator, default ''=LF.\n"
 	     "\tbrep	[s [t]]	as before, but use replace\n"
 	     "\tbupd	[s [t]]	as before, but use update\n"

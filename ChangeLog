@@ -1,3 +1,16 @@
+2006-07-22    <tino@firebird.03.softkill.net>
+
+	* dbm.c (data_free, db_get): added
+	(c_dump, c_alter, c_delete, c_get, hunt, c_filter): replaced
+	gdbm_fetch() by db_get() to resolve memory leak.
+	(db_next): changed to resolve another memory leak.
+	(db_data): marked that data is allocated to resolve possibly
+	memory leak (cannot happen, but be sure).
+	(read_data_term_s): just a fix for a possible memory leak (there
+	shall be none in this case).
+	(dobget, c_bget, c_bget0): added
+	(main): usage updated
+
 2006-06-11    <tino@firebird.03.softkill.net>
 
 	* dbm.c (main): added return values of dbm

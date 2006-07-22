@@ -1,1 +1,25 @@
-"alter" command should work now
+Memory leaks fixed, "bget"/"bget0" added and "list" improved
+
+There was a memory leak as the allocated pointers were not freed.
+Most commands did not have any problem, but all list commands which
+read data from the database were affected:
+
+filter, find, search, list, dump
+
+Also there is a new command "bget" for a batch type get:
+<pre>
+find . -type f -print |
+dbm bget DB/files '
+' '
+' |
+while read -r file && read -r data
+do
+	: whatever
+done
+</pre>
+
+Beware of filenames with LF in it.  Find knows a "-print0" so dbm
+knows a "bget0", too.
+
+Also the "list" command now is able to output NUL or other strings as
+line terminator.
