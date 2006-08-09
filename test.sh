@@ -6,13 +6,15 @@
 # I am just too clumsy.
 #
 # $Log$
-# Revision 1.1  2006-08-09 23:11:08  tino
-# Test script added.  Well it's very small for now.
+# Revision 1.2  2006-08-09 23:13:17  tino
+# Typo corrected.
 #
+# Revision 1.1  2006/08/09 23:11:08  tino
+# Test script added.  Well it's very small for now.
 
-
-echo "Please ignore error messages.  They must show up."
-echo "If [ALL OK} is printed, everything is fine."
+echo
+echo "Please ignore error messages.  These must show up."
+echo "If [ALL OK] is printed, everything is fine."
 echo "Else the script just stops and sets an error code."
 echo
 
