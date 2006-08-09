@@ -1,25 +1,8 @@
-Memory leaks fixed, "bget"/"bget0" added and "list" improved
+Batch version of "alter" commands balter and balter0 added
 
-There was a memory leak as the allocated pointers were not freed.
-Most commands did not have any problem, but all list commands which
-read data from the database were affected:
+There was a bug in the alter command in case the third argument was
+not present.  This shall be fixed now.
 
-filter, find, search, list, dump
-
-Also there is a new command "bget" for a batch type get:
-<pre>
-find . -type f -print |
-dbm bget DB/files '
-' '
-' |
-while read -r file && read -r data
-do
-	: whatever
-done
-</pre>
-
-Beware of filenames with LF in it.  Find knows a "-print0" so dbm
-knows a "bget0", too.
-
-Also the "list" command now is able to output NUL or other strings as
-line terminator.
+The code now becomes more and more hacked.  This is not good.  So it
+shall be rewritten from scratch with a more clean structure.  However
+I do not have the time to do a clean rewrite (sigh).

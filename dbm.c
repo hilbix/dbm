@@ -22,7 +22,10 @@
  * USA
  *
  * $Log$
- * Revision 1.15  2006-07-22 00:49:04  tino
+ * Revision 1.16  2006-08-09 23:11:08  tino
+ * Test script added.  Well it's very small for now.
+ *
+ * Revision 1.15  2006/07/22 00:49:04  tino
  * See ChangeLog
  *
  * Revision 1.14  2006/07/15 14:51:54  tino
@@ -259,6 +262,23 @@ db_store(int argc, char **argv, int flag, int check)
 }
 
 static void
+db_replace(char *name, datum d)
+{
+  if (gdbm_store(db, key, d, GDBM_REPLACE))
+    ex(2, "cannot store into %s", name);
+}
+
+static void
+db_cmp(char *val)
+{
+  db_get();
+  if (!data.dptr)
+    ex(1, "key does not exist");
+  if (data.dsize!=strlen(val) || memcmp(data.dptr,val,data.dsize))
+    ex(2, "key data mismatch");
+}
+
+static void
 c_create(int argc, char **argv)
 {
   struct stat	st;
@@ -423,18 +443,31 @@ c_update(int argc, char **argv)
 static void
 c_alter(int argc, char **argv)
 {
+  datum	o;
+
   db_data(argc-3, argv+3);
+
+  /* ugly hack:
+   *
+   * db_cmp kills datum data
+   */
+  o		= data;
+  data.dptr	= 0;
 
   db_open(argv[0], GDBM_WRITER, NULL);
   db_key(argv[1]);
-  db_get();
-  if (!data.dptr)
-    ex(1, "key does not exist: %s", argv[0]);
-  if (data.dsize!=strlen(argv[2]) || memcmp(data.dptr,argv[2],data.dsize))
-    ex(2, "key data mismatch");
-  db_data(argc-3, argv+3);
-  if (gdbm_store(db, key, data, GDBM_REPLACE))
-    ex(2, "cannot store %s into %s", argv[1], argv[0]);
+  db_cmp(argv[2]);
+  db_replace(argv[0], o);
+}
+
+static void
+batch_alter(int argc, char **argv)
+{
+  if (!db)
+    db_open(argv[0], GDBM_WRITER, NULL);
+  db_cmp(argv[1]);
+  db_data(argc-2, argv+2);	/* does not read from stdin	*/
+  db_replace(argv[0], data);
 }
 
 static void
@@ -528,24 +561,36 @@ c_batch0(int argc, char **argv)
 }
 
 static void
-batcher_new(int argc, char **argv, int term)
+batcher_new(int argc, char **argv, int term, void (*fn)(int argc, char **argv))
 {
   int	c;
 
   while ((c=read_key_term_c(term))!=EOF)
-    batch_store(argc, argv);
+    fn(argc, argv);
 }  
 
 static void
 c_nbatch(int argc, char **argv)
 {
-  batcher_new(argc, argv, '\n');
+  batcher_new(argc, argv, '\n', batch_store);
 }
 
 static void
 c_nbatch0(int argc, char **argv)
 {
-  batcher_new(argc, argv, 0);
+  batcher_new(argc, argv, 0, batch_store);
+}
+
+static void
+c_balter(int argc, char **argv)
+{
+  batcher_new(argc, argv, '\n', batch_alter);
+}
+
+static void
+c_balter0(int argc, char **argv)
+{
+  batcher_new(argc, argv, 0, batch_alter);
 }
 
 static int
@@ -915,6 +960,8 @@ struct
     { "replace",c_replace,	1, 2	},
     { "update",	c_update,	1, 2	},
     { "alter",	c_alter,	2, 3	},
+    { "balter",	c_balter,	2, 2	},
+    { "balter0", c_balter0,	2, 2	},
     { "delete",	c_delete,	1, 2	},
     { "get",	c_get,		1, 1	},
     { "bget",	c_bget,		0, 2	},
@@ -979,6 +1026,8 @@ main(int argc, char **argv)
 	     "\t		(find . -type f -print0 | dbm batch0 db x y)\n"
 	     "\tnbatch	i [r]	like batch, but requires line terminator\n"
 	     "\tnbatch0	i [r]	like batch0, but requires line terminator 0\n"
+	     "\tbalter	o d	like batch, but alter old (o) values\n"
+	     "\tbalter0	o d	like balter, but line terminator 0\n"
 	     "\n"
 	     "\tbget	[s [p]]	batch get, read keys from stdin and output data.\n"
 	     "\t		s is the key terminator, default ''=blanks.\n"
