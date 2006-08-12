@@ -1,8 +1,3 @@
-Batch version of "alter" commands balter and balter0 added
+Option -q for quiet timeouts added
 
-There was a bug in the alter command in case the third argument was
-not present.  This shall be fixed now.
-
-The code now becomes more and more hacked.  This is not good.  So it
-shall be rewritten from scratch with a more clean structure.  However
-I do not have the time to do a clean rewrite (sigh).
+It is like option -t but inhibits the sleep warning.

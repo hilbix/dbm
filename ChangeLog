@@ -1,3 +1,7 @@
+2006-08-12    <tino@firebird.03.softkill.net>
+
+	* dbm.c (db_open, main): option -q added for quiet timeouts
+
 2006-08-10    <tino@firebird.03.softkill.net>
 
 	* dbm.c (batch_alter, c_balter, c_balter0): added

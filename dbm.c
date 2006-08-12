@@ -22,7 +22,10 @@
  * USA
  *
  * $Log$
- * Revision 1.16  2006-08-09 23:11:08  tino
+ * Revision 1.17  2006-08-12 12:26:26  tino
+ * option -q
+ *
+ * Revision 1.16  2006/08/09 23:11:08  tino
  * Test script added.  Well it's very small for now.
  *
  * Revision 1.15  2006/07/22 00:49:04  tino
@@ -88,6 +91,8 @@
 
 #include "dbm_version.h"
 #include "tino_memwild.h"
+
+static int ignoresleep;
 
 static void
 ex(int nr, const char *s, ...)
@@ -156,7 +161,8 @@ db_open(char *name, int mode, const char *type)
 	      if (!now)
 		{
 		  time(&now);
-		  fprintf(stderr, "sleeping: %s: %s\n", type, gdbm_strerror(gdbm_errno));
+		  if (!ignoresleep)
+		    fprintf(stderr, "sleeping: %s: %s\n", type, gdbm_strerror(gdbm_errno));
 		  hold.tv_sec	= 0;
 		  hold.tv_nsec	= 0;
 		  continue;
@@ -989,14 +995,23 @@ main(int argc, char **argv)
 
   arg0	= argv[0];
 
-  if (argc>1 && argv[1][0]=='-' && argv[1][1]=='t')	/* actually a hack	*/
-    argc--, timeout=atoi(*++argv+2);			/* set timeout	*/
+  if (argc>1 && argv[1][0]=='-')	/* actually a hack	*/
+    switch (argv[1][1])
+      {
+      case 'q':
+	ignoresleep=1;			/* set quiet timeout	*/
+      case 't':
+	timeout=atoi(*++argv+2);	/* set timeout	*/
+	argc--;
+	break;
+      }
   if (argc<2)
     {
-      printf("Usage: %s [-tSEC] action gdbm-file [args...]\n"
+      printf("Usage: %s [-tSEC|-qSEC] action gdbm-file [args...]\n"
 	     "\tVersion %s compiled %s\n"
 	     "\treturn 0=ok 1=missing_key 2=no_store 10=other 255=locked/timeout\n"
 	     "\n"
+	     "\t-qSEC	quiet timeout, like -t\n"
 	     "\t-tSEC	timeout in seconds, -1=unlimited, 0=none (default)\n"
 	     "\n"
 	     "\tAction	Args	Description:\n"
