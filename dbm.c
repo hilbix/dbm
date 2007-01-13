@@ -4,7 +4,7 @@
  *
  * This source shall be independent of others.  Therefor no tinolib.
  *
- * Copyright (C)2004-2006 by Valentin Hilbig
+ * Copyright (C)2004-2007 by Valentin Hilbig
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -22,7 +22,11 @@
  * USA
  *
  * $Log$
- * Revision 1.17  2006-08-12 12:26:26  tino
+ * Revision 1.18  2007-01-13 01:03:59  tino
+ * db_close() called before errors are printed.
+ * This is in preparation to add the changes for option -a
+ *
+ * Revision 1.17  2006/08/12 12:26:26  tino
  * option -q
  *
  * Revision 1.16  2006/08/09 23:11:08  tino
@@ -94,18 +98,29 @@
 
 static int ignoresleep;
 
+static void db_close(void);
+
 static void
 ex(int nr, const char *s, ...)
 {
   va_list	list;
-  int		e;
+  int		e, ge;
+  static int	inerr;
 
   e	= errno;
-  fprintf(stderr, "error: ");
+  ge	= gdbm_errno;
+  if (inerr)
+    fprintf(stderr, "error: within error while closing: ");
+  else
+    {
+      inerr	= 1;
+      db_close();
+      fprintf(stderr, "error: ");
+    }
   va_start(list, s);
   vfprintf(stderr, s, list);
   va_end(list);
-  fprintf(stderr, ": %s (%s)\n", strerror(e), gdbm_strerror(gdbm_errno));
+  fprintf(stderr, ": %s (%s)\n", strerror(e), gdbm_strerror(ge));
   exit(nr ? nr : 10);
 }
 

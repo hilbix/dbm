@@ -1,3 +1,4 @@
-Option -q for quiet timeouts added
+Small improvement in error handling
 
-It is like option -t but inhibits the sleep warning.
+The database now is closed before something is printed.
+This helps in the "stopped terminal" situation.
