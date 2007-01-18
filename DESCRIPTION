@@ -1,7 +1,10 @@
 A little tool to access gdbm files from shell.
 # $Header$
 # $Log$
-# Revision 1.2  2006-04-11 23:26:00  tino
+# Revision 1.3  2007-01-18 18:11:40  tino
+# Prep new dist
+#
+# Revision 1.2  2006/04/11 23:26:00  tino
 # commit for dist
 #
 # Revision 1.1  2004/12/13 23:57:54  tino
@@ -43,4 +46,5 @@ done
 </PRE>
 The "sort" is a hack to "buffer" the output, such that the database
 files are closed when the loop runs such that the insert can be
-writer.
+writer.  You don't need this anymore if you give '-a-1' to each
+of the dbm commands.

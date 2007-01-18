@@ -1,3 +1,40 @@
+2007-01-18    <tino@firebird.03.softkill.net>
+
+	* dbm.c (run): main() splitted into 2 routines, as the old main
+	got too long.
+	(main): "bdel ' ' data" can now do deletes if data matches.
+	(db_cmp): improved error output
+	(db_delete): added, used by c_delete and c_bdel now.  This changes
+	the error messages a little bit.
+	(c_export, c_import): added (with a bunch of supporting rountines)
+	(db_put): added
+	(ex): error output improved: always prefixed by DB name
+	(batch_store): altered to use db_put() and new error reporting
+	(db_store): improved error output, now uses db_put
+
+2007-01-15  U-KOSH\Administrator  <Administrator@KOSH>
+
+	Kludgy kludges kludged.  I hate this all, it shall be done better
+	with a completely new DB interface, but I lack the time.  SIGH.
+	
+	* dbm.c (db_open): random waiting added to hinder timeout cascades
+	of concurrently running jobs under CygWin.  It works.
+	(db_close_if): added to allow advanced timeouts.  The call to this
+	function is now spreaded widely in the source at vairous places.
+	Hopefully I did not forget one.
+	(c_bget): bget now operates on partially last lines, too (those
+	which do not have a line terminator).  This is not true for the
+	bget0 case!  No harm is done.  Usually this was a bug anyway in
+	scripts which forgot to do things like "dbm list | dbm bget"
+	instead of "{ dbm list; echo; } | dbm bget", which is unintuitive.
+	But if a broken script hands out broken last lines, usually this
+	will not find anything, so bget bails out.
+	(ex): db_close now is calles before error exit prints something.
+	This is to improve behavior in case you stop a script with CTRL-S,
+	such that it cannot output anything.  In error state the database
+	thus now is freed before the process is waiting for IO, such that
+	other processes can access the DB again.
+
 2006-08-12    <tino@firebird.03.softkill.net>
 
 	* dbm.c (db_open, main): option -q added for quiet timeouts
