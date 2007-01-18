@@ -4,7 +4,7 @@
  *
  * This source shall be independent of others.  Therefor no tinolib.
  *
- * Copyright (C)2004-2007 by Valentin Hilbig
+ * Copyright (C)2004-2007 by Valentin Hilbig <webmaster@scylla-charybdis.com>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -22,7 +22,10 @@
  * USA
  *
  * $Log$
- * Revision 1.18  2007-01-13 01:03:59  tino
+ * Revision 1.19  2007-01-18 18:12:38  tino
+ * Lot of changes, see ChangeLog and ANNOUNCE.  Commit before function checks.
+ *
+ * Revision 1.18  2007/01/13 01:03:59  tino
  * db_close() called before errors are printed.
  * This is in preparation to add the changes for option -a
  *
@@ -96,7 +99,8 @@
 #include "dbm_version.h"
 #include "tino_memwild.h"
 
-static int ignoresleep;
+static int ignoresleep, advancedsleep;
+static const char	*db_name;
 
 static void db_close(void);
 
@@ -110,13 +114,17 @@ ex(int nr, const char *s, ...)
   e	= errno;
   ge	= gdbm_errno;
   if (inerr)
-    fprintf(stderr, "error: within error while closing: ");
+    fprintf(stderr, "error within error");
   else
     {
       inerr	= 1;
       db_close();
-      fprintf(stderr, "error: ");
+      fprintf(stderr, "error");
     }
+  if (db_name)
+    fprintf(stderr, " %s:", db_name);
+  else
+    fprintf(stderr, ":");
   va_start(list, s);
   vfprintf(stderr, s, list);
   va_end(list);
@@ -159,17 +167,19 @@ data_free(void)
 static void
 db_open(char *name, int mode, const char *type)
 {
+  static int		seeded;
   struct stat		st;
   struct timespec	hold;
   time_t		now=0;
 
+  db_name	= name;
   if (!type)
     type	= "open";
   if (mode!=GDBM_WRCREAT && lstat(name, &st))
-    ex(0, "database missing: %s", name);
+    ex(0, "database missing");
   while ((db=gdbm_open(name, BUFSIZ, mode, 0775, fatal_func))==0)
     {
-      if (gdbm_errno==GDBM_CANT_BE_READER || gdbm_errno==GDBM_CANT_BE_WRITER)
+      if (errno==EBUSY || gdbm_errno==GDBM_CANT_BE_READER || gdbm_errno==GDBM_CANT_BE_WRITER)
 	{
 	  if (timeout)
 	    {
@@ -184,15 +194,20 @@ db_open(char *name, int mode, const char *type)
 		}
 	      if (timeout<0 || time(NULL)-now<=timeout)
 		{
+  		  if (!seeded)
+		    srand(getpid());	/* we need different random for each process	*/
+		  seeded	= 1;
 		  if (hold.tv_nsec<500000000l)
 		    hold.tv_nsec	+= 1000000l;
+		  hold.tv_nsec -= rand()&0xffff;	/* randomnize the wait	*/
 		  nanosleep(&hold, NULL);
+		  errno	= 0;	/* CygWin fix: Sometimes open fails with EBUSY */
 		  continue;
 		}
 	    }
-	  ex(-1, "timeout %s db: %s", type, name);
+	  ex(-1, "timeout %s db", type);
 	}
-      ex(0, "cannot %s db: %s", type, name);
+      ex(0, "cannot %s db", type);
     }
 }
 
@@ -224,6 +239,13 @@ db_close(void)
       gdbm_close(db);
     }
   db	= 0;
+}
+
+static void
+db_close_if(void)
+{
+  if (advancedsleep)
+    db_close();
 }
 
 static void
@@ -269,34 +291,56 @@ db_data(int argc, char **argv)
     }
 }
 
+static int
+db_put(char *name, int replace, int check)
+{
+  if (!db)
+    db_open(name, GDBM_WRITER, NULL);
+  if (check>0 && !gdbm_exists(db, key))
+    ex(1, "key does not exist: %.*s", (int)key.dsize, key.dptr);
+  if (gdbm_store(db, key, data, replace ? GDBM_REPLACE : GDBM_INSERT))
+    {
+      if (check<0)
+	return 1;
+      ex(2, "cannot store %.*s into %.*s", (int)data.dsize, data.dptr, (int)key.dsize, key.dptr);
+    }
+  return 0;
+}
+
 static void
 db_store(int argc, char **argv, int flag, int check)
 {
   db_data(argc-2, argv+2);
-
-  db_open(argv[0], GDBM_WRITER, NULL);
   db_key(argv[1]);
-  if (check && !gdbm_exists(db, key))
-    ex(2, "key does not exist: %s", argv[0]);
-  if (gdbm_store(db, key, data, flag))
-    ex(2, "cannot store %s into %s", argv[1], argv[0]);
+  db_put(argv[0], flag, check);
 }
 
 static void
-db_replace(char *name, datum d)
+db_replace(datum d)
 {
   if (gdbm_store(db, key, d, GDBM_REPLACE))
-    ex(2, "cannot store into %s", name);
+    ex(2, "cannot store %.*s into %.*s", (int)d.dsize, d.dptr, (int)key.dsize, key.dptr);
 }
 
 static void
-db_cmp(char *val)
+db_cmp(const char *val)
 {
   db_get();
   if (!data.dptr)
-    ex(1, "key does not exist");
+    ex(1, "key does not exist: %.*s", (int)key.dsize, key.dptr);
   if (data.dsize!=strlen(val) || memcmp(data.dptr,val,data.dsize))
-    ex(2, "key data mismatch");
+    ex(2, "key data mismatch: %.*s", (int)key.dsize, key.dptr);
+}
+
+static void
+db_delete(char *name, const char *cmp)
+{
+  if (!db)
+    db_open(name, GDBM_WRITER, NULL);
+  if (cmp)
+    db_cmp(cmp);
+  if (gdbm_delete(db, key))
+    ex(1, "could not delete %.*s", (int)key.dsize, key.dptr);
 }
 
 static void
@@ -305,9 +349,9 @@ c_create(int argc, char **argv)
   struct stat	st;
 
   if (!lstat(argv[0], &st))
-    ex(0, "already exists: %s", argv[0]);
+    ex(0, "already exists");
   if (errno!=ENOENT)
-    ex(0, "not supported error return: %s", argv[0]);
+    ex(0, "unsupported error return value");
   db_open(argv[0], GDBM_WRCREAT, "create");
 }
 
@@ -316,9 +360,9 @@ c_kill(int argc, char **argv)
 {
   db_open(argv[0], GDBM_WRITER, NULL);
   if (db_first())
-    ex(0, "database not empty: %s", argv[0]);
+    ex(0, "database not empty");
   if (unlink(argv[0]))
-    ex(0, "cannot unlink: %s", argv[0]);
+    ex(0, "cannot unlink");
 }
 
 static void
@@ -326,7 +370,7 @@ c_reorg(int argc, char **argv)
 {
   db_open(argv[0], GDBM_WRITER, NULL);
   if (gdbm_reorganize(db))
-    ex(0, "error reorganizing: %s", argv[0]);
+    ex(0, "error reorganizing");
 }
 
 static void
@@ -446,19 +490,19 @@ c_dump(int argc, char **argv)
 static void
 c_insert(int argc, char **argv)
 {
-  db_store(argc, argv, GDBM_INSERT, 0);
+  db_store(argc, argv, 0, 0);
 }
 
 static void
 c_replace(int argc, char **argv)
 {
-  db_store(argc, argv, GDBM_REPLACE, 0);
+  db_store(argc, argv, 1, 0);
 }
 
 static void
 c_update(int argc, char **argv)
 {
-  db_store(argc, argv, GDBM_REPLACE, 1);
+  db_store(argc, argv, 1, 1);
 }
 
 static void
@@ -478,7 +522,7 @@ c_alter(int argc, char **argv)
   db_open(argv[0], GDBM_WRITER, NULL);
   db_key(argv[1]);
   db_cmp(argv[2]);
-  db_replace(argv[0], o);
+  db_replace(o);
 }
 
 static void
@@ -488,22 +532,14 @@ batch_alter(int argc, char **argv)
     db_open(argv[0], GDBM_WRITER, NULL);
   db_cmp(argv[1]);
   db_data(argc-2, argv+2);	/* does not read from stdin	*/
-  db_replace(argv[0], data);
+  db_replace(data);
 }
 
 static void
 c_delete(int argc, char **argv)
 {
-  db_open(argv[0], GDBM_WRITER, NULL);
   db_key(argv[1]);
-  if (argc==2)
-    {
-      db_get();
-      if (data.dptr && (data.dsize!=strlen(argv[2]) || memcmp(data.dptr,argv[2],data.dsize)))
-	ex(2, "key data mismatch");
-    }
-  if (gdbm_delete(db, key))
-    ex(1, "could not delete '%s': %s", argv[1], argv[0]);
+  db_delete(argv[0], argc==2 ? argv[2] : NULL);
 }
 
 static void
@@ -513,25 +549,21 @@ c_get(int argc, char **argv)
   db_key(argv[1]);
   db_get();
   if (!data.dptr)
-    exit(1);
+    exit(1);	/* no data, print nothing, common case!	*/
+  db_close_if();
   fwrite(data.dptr, data.dsize, 1, stdout);
 }
 
 static void
 batch_store(int argc, char **argv)
 {
-  if (!db)
-    db_open(argv[0], GDBM_WRITER, NULL);
   db_data(0, argv+1);	/* does not read from stdin	*/
-  if (!gdbm_store(db, key, data, GDBM_INSERT))
-    return;
-  if (argc>1)
+  if (db_put(argv[0], 0, (argc>1 ? -1 : 0)))
     {
-      db_data(0, argv+2);
-      if (!gdbm_store(db, key, data, GDBM_REPLACE))
-	return;
+      db_data(0, argv+2);	/* dito	*/
+      db_put(argv[0], 1, 0);
     }
-  ex(2, "cannot store %s into %s", argv[1], argv[0]);
+  db_close_if();
 }
 
 static __inline__ void
@@ -550,6 +582,7 @@ read_key_term_c(int term)
 {
   int	i, c;
 
+  db_close_if();
   for (i=0; (c=getchar())!=EOF && c!=term; i++)
     kbuf_set(i, c);
   key		= kbuf;
@@ -620,6 +653,7 @@ read_key_term_s(const char *term)
   int		i, c, l;
   size_t	len;
 
+  db_close_if();
   if (!*term)
     {
       for (i=0; (c=getchar())!=EOF && !isspace(c); i++)
@@ -688,10 +722,7 @@ c_bdel(int argc, char **argv)
   term	= (argc ? argv[1] : "");
   while ((c=read_key_term_s(term))!=EOF || key.dsize)
     {
-      if (!db)
-	db_open(argv[0], GDBM_WRITER, NULL);
-      if (gdbm_delete(db, key))
-        ex(1, "could not delete '%s': %s", argv[1], argv[0]);
+      db_delete(argv[0], argc==2 ? argv[2] : NULL);
       if (c==EOF)
 	break;
     }
@@ -712,12 +743,7 @@ batch_read(int argc, char **argv, int flag, int check)
       data.dsize	= 0;
       if (c!=EOF)
         c	= read_data_term_s(eol);
-      if (!db)
-	db_open(argv[0], GDBM_WRITER, NULL);
-      if (check && !gdbm_exists(db, key))
-        ex(1, "key/data pair %d has missing key", i);
-      if (gdbm_store(db, key, data, flag))
-        ex(2, "cannot store key/data pair %d", i);
+      db_put(argv[0], flag, check);
       if (c==EOF)
         break;
     }
@@ -726,19 +752,19 @@ batch_read(int argc, char **argv, int flag, int check)
 static void
 c_bins(int argc, char **argv)
 {
-  batch_read(argc, argv, GDBM_INSERT, 0);
+  batch_read(argc, argv, 0, 0);
 }
 
 static void
 c_brep(int argc, char **argv)
 {
-  batch_read(argc, argv, GDBM_REPLACE, 0);
+  batch_read(argc, argv, 1, 0);
 }
 
 static void
 c_bupd(int argc, char **argv)
 {
-  batch_read(argc, argv, GDBM_REPLACE, 1);
+  batch_read(argc, argv, 1, 1);
 }
 
 /* Well, there is a funny side effect, which is a feature:
@@ -823,6 +849,7 @@ dobget(char **argv, char *sep)
   if (!db)
     db_open(argv[0], GDBM_READER, NULL);
   db_get();
+  db_close_if();
   if (!data.dptr)
     ex(1, "key does not exist: %.*s", (int)key.dsize, key.dptr);
   if (sep)
@@ -844,8 +871,12 @@ c_bget(int argc, char **argv)
 
   term	= (argc>0 ? argv[1] : "");
   sep	= (argc>1 ? argv[2] : 0);
-  while ((c=read_key_term_s(term))!=EOF)
-    dobget(argv, sep);
+  while ((c=read_key_term_s(term))!=EOF || key.dsize)
+    {
+      dobget(argv, sep);
+      if (c==EOF)
+	break;
+    }
 }
 
 static void
@@ -896,9 +927,9 @@ c_filter(int argc, char **argv)
     {
       if (!db)
 	db_open(argv[0], GDBM_READER, NULL);
-      DP(("key %.*s", key.dsize, key.dptr));
+      DP(("key %.*s", (int)key.dsize, key.dptr));
       db_get();
-      DP(("data %*s", data.dsize, data.dptr));
+      DP(("data %*s", (int)data.dsize, data.dptr));
       /* Argh:
        * We have following cases:
        * kdm vars from above, e=key exists, c=datamatch p=print (-=any)
@@ -960,9 +991,160 @@ c_filter(int argc, char **argv)
 	   continue;		/* -1x 1X 0	*/
 	}			/* -1x 1x 1	*/
       DP(("put"));
+      db_close_if();
       fwrite(key.dptr, key.dsize, 1, stdout);
       fputs(term, stdout);
     }
+}
+
+static void
+xmlescape(const unsigned char *ptr, size_t len, const char *format)
+{
+  unsigned char	c;
+  int		i;
+
+  if (!format)
+    format	= "&#%d;";
+  for (i=len; --i>=0; )
+    if ((c= *ptr++)<' ' || c==127	/* not needed but nice to have	*/
+	|| c=='&' || c=='<'		/* escapes for element contents	*/
+	|| c=='>'		/* must be escaped for simple parsing	*/
+	|| c=='"' || c=='\''		/* escapes for arguments	*/
+	)
+      printf(format, c);
+    else
+      putchar(c);
+}
+
+static void
+xmldump(const unsigned char *ptr, size_t len, const char *ele)
+{
+  printf("  <%s>", ele);
+  xmlescape(ptr, len, NULL);
+  printf("</%s>\n", ele);
+}
+
+static void
+c_export(int argc, char **argv)
+{
+  time_t	tim;
+  struct tm	*tm;
+  int		row;
+
+  db_open(argv[0], GDBM_READER, NULL);
+  /* We use ISO-8859-1 as the default
+   */
+  printf("<?xml version=\"1.0\" encoding=\"%s\" standalone=\"yes\" ?>\n", argc>0 ? argv[1] : "ISO-8859-1");
+  printf("<dbm name=\"");
+  xmlescape(argv[0], strlen(argv[0]), NULL);
+  time(&tim);
+  tm	= gmtime(&tim);
+  printf("\" utcdate=\"%04d-%02d-%02d %02d:%02d:%02d\">\n",
+	 tm->tm_year+1900, tm->tm_mon+1, tm->tm_mday,
+	 tm->tm_hour, tm->tm_min, tm->tm_sec);
+  row	= 0;
+  if (db_first())
+    do
+      {
+	printf(" <row n=\"%d\">\n", ++row);
+	xmldump(key.dptr,  key.dsize, "key");
+	db_get();
+	xmldump(data.dptr, data.dsize, "data");
+	printf(" </row>\n");
+      } while (db_next());
+  printf("</dbm>\n");
+  printf("<!-- %d rows -->\n", row);
+}
+
+static int
+xmlcmp(const char *s)
+{
+  size_t len;
+
+  len	= strlen(s);
+  return (key.dsize<len || (!len && memcmp(key.dptr, s, len)));
+}
+
+static void
+xmlget(void)
+{
+  if (read_key_term_s("<") && !key.dsize)
+    ex(0, "unexpected end of file");
+}
+
+static int
+xmlskip(const char *s)
+{
+  xmlget();
+  return xmlcmp(s);
+}
+
+/* Yes, bad design, it is as it is:
+ */
+static int
+xmlcmp2(const char *s)
+{
+  size_t len;
+
+  len	= strlen(s);
+  return (data.dsize<len || (!len && memcmp(data.dptr, s, len)));
+}
+
+static void
+xmlget2(void)
+{
+  if (read_data_term_s("<") && !data.dsize)
+    ex(0, "unexpected end of file");
+}
+
+static int
+xmlskip2(const char *s)
+{
+  xmlget2();
+  return xmlcmp2(s);
+}
+
+/* This is supposed to be able to read what export wrote,
+ * it is not supposed to be a correct XML parser!
+ *
+ * In fact the file is broken up into fields terminated by "<".
+ * And it will not parse any XML entries nor entities!
+ */
+static void
+c_import(int argc, char **argv)
+{
+  int	row;
+
+  if (argc==1 && !freopen(argv[1], "rb", stdin))
+    ex(0, "cannot open %s", argv[1]);
+  if (xmlskip("") || xmlskip("?xml ") || xmlskip("dbm "))
+    ex(0, "parse error in header");
+  row	= 0;
+  while (xmlskip("row "))
+    {
+      row++;
+      if (xmlskip("key>"))
+        ex(0, "key-tag expected in row %d", row);
+      if (xmlskip2("/row>"))
+        ex(0, "key-tag not closed in row %d", row);
+      if (xmlskip2("data>"))
+        ex(0, "data-tag expected in row %d", row);
+      key.dptr	+= 4;
+      key.dsize	-= 4;
+      data.dptr	+= 5;
+      data.dsize-= 5;
+      db_put(argv[0],0,0);
+      /* We do not need to adjust the key/data pointers as they came
+       * from the global read-buffers.
+       */
+      db_close_if();
+      if (xmlskip("/data>"))
+        ex(0, "data-tag not properly closed in row %d", row);
+      if (xmlskip("/row>"))
+        ex(0, "row-tag not properly closed in row %d", row);
+    }
+  if (xmlcmp("/dbm>"))
+    ex(0, "missing row-tag/dbm-tag not properly closed in row %d", row);
 }
 
 struct
@@ -977,6 +1159,8 @@ struct
     { "reorg",	c_reorg,	0, 0	},
     { "list",	c_list,		0, 2	},
     { "dump",	c_dump,		0, 1	},
+    { "export",	c_export,	0, 1	},
+    { "import",	c_import,	0, 1	},
     { "insert",	c_insert,	1, 2	},
     { "replace",c_replace,	1, 2	},
     { "update",	c_update,	1, 2	},
@@ -991,7 +1175,7 @@ struct
     { "batch0",	c_batch0,	1, 2	},
     { "nbatch",	c_nbatch,	1, 2	},
     { "nbatch0", c_nbatch0,	1, 2	},
-    { "bdel",	c_bdel,		0, 1	},
+    { "bdel",	c_bdel,		0, 2	},
     { "bins",	c_bins,		0, 2	},
     { "brep",	c_brep,		0, 2	},
     { "bupd",	c_bupd,		0, 2	},
@@ -1002,10 +1186,11 @@ struct
     { "nsearch",c_nsearch,	2, -1	},
   };
 
+static int run(int argc, char **argv);
+
 int
 main(int argc, char **argv)
 {
-  int	i;
   char	*arg0;
 
   arg0	= argv[0];
@@ -1013,6 +1198,8 @@ main(int argc, char **argv)
   if (argc>1 && argv[1][0]=='-')	/* actually a hack	*/
     switch (argv[1][1])
       {
+      case 'a':
+	advancedsleep=1;		/* set automatic timeout	*/
       case 'q':
 	ignoresleep=1;			/* set quiet timeout	*/
       case 't':
@@ -1026,6 +1213,7 @@ main(int argc, char **argv)
 	     "\tVersion %s compiled %s\n"
 	     "\treturn 0=ok 1=missing_key 2=no_store 10=other 255=locked/timeout\n"
 	     "\n"
+	     "\t-aSEC	advanced timeout, like -q, but keep db closed if possible\n"
 	     "\t-qSEC	quiet timeout, like -t\n"
 	     "\t-tSEC	timeout in seconds, -1=unlimited, 0=none (default)\n"
 	     "\n"
@@ -1033,11 +1221,15 @@ main(int argc, char **argv)
 	     "\t-------	-------	------------\n"
 	     "\tcreate	-	create new DBM file, fails if exists\n"
 	     "\tkill	-	erase DBM file if empty\n"
-	     "\treorg	-	reorganize DBM\n"
+	     "\treorg	-	reorganize DBM (fails under CygWin?!?)\n"
 	     "\n"
 	     "\tlist	[n [p]]	write n keys to stdout, default 1, 0=all\n"
 	     "\t		p is the line terminator, default LF, '' for NUL\n"
 	     "\tdump	[n]	diagnostic dump, default 0=all\n"
+	     "\texport	[c]	dump database to some XML like output\n"
+	     "\t		c is the character encoding, default ISO-8859-1\n"
+	     "\timport	[file]	read database from what export wrote\n"
+	     "\t		Please note that DBM does not parse encodings!\n"
 	     "\n"
 	     "\tinsert	key [d]	insert d(ata) under key, must not exist\n"
 	     "\t		If d is missing, data is read from stdin\n"
@@ -1067,7 +1259,8 @@ main(int argc, char **argv)
 	     "\t		t is the data terminator, default ''=LF.\n"
 	     "\tbrep	[s [t]]	as before, but use replace\n"
 	     "\tbupd	[s [t]]	as before, but use update\n"
-	     "\tbdel	[s]	delete keys read from stdin\n"
+	     "\tbdel	[s [d]]	delete keys read from stdin.\n"
+	     "\t		if data(d) is given it must match.\n"
 	     "\n"
 	     "\tfilter	kmpt d	filter keys read from stdin (default: kmpt=000)\n"
 	     "\t		Key must (k!=0) or must not exist (k=0)\n"
@@ -1080,6 +1273,7 @@ main(int argc, char **argv)
 	     "\tsearch	n patrn	as before, but use patterns\n"
 	     "\tnfind	n data	like find, but data must not match\n"
 	     "\tnsearch	n patrn	like search, but data must not match\n"
+	     "\t		note: to search in keys use list | grep\n"
 	     "\n"
 	     "\tpattern help:   ?, *, [^xyz] or [a-z] are supported.  Hints:\n"
 	     "\t		[*], [?], [[] matches literal *, ?, [ respectively\n"
@@ -1087,6 +1281,14 @@ main(int argc, char **argv)
 	     , arg0, DBM_VERSION, __DATE__);
       return 1;
     }
+  return run(argc, argv);
+}
+
+static int
+run(int argc, char **argv)
+{
+  int	i;
+
   for (i=sizeof actions/sizeof *actions; --i>=0; )
     if (!strcmp(actions[i].command, argv[1]))
       {
