@@ -25,15 +25,15 @@ dd bs=$RANDOM if=/dev/zero count=123
 
 What I really would like to see is following:
 
-[ plug in USB harddrive as sda ]
+[ plug in USB harddrive as sda.  The data will be killed! ]
 # mount /dev/sda1 /mnt
 # enter-valuable-data-in-database /mnt/db.hooray &
 # sleep 20; sync; sleep 100; sync; sleep 200
-# dd if=/dev/random of=/dev/hda count=10000
+# dd if=/dev/random of=/dev/sda count=10000
 #
 [ NOW UNPLUG THE USB DRIVE *WHILE* IT'S WRITTEN TO !!!! ]
 /mnt/db.hooray: write error
-kernel panic: cannot access hda, data lost
+kernel panic: cannot access sda, data lost
 # umount /mnt
 [ plug in USB harddrive again ]
 # mount /dev/sda1 /mnt
@@ -49,10 +49,12 @@ perfectly working.  Errors are normal.  And you know murphy: If there
 is something which still works even if something fails the worst, then
 a new type of error shows up.  I am bored with all the plain old
 common types of errors showing up now and then, I would like to see
-such new types of errors.  YKWIM.
+some new types of errors.  YKWIM.
 
 -Tino, webmaster@scylla-charybdis.com
 $Log$
-Revision 1.1  2004-08-22 05:52:30  Administrator
-Intermediate version for search functionality
+Revision 1.2  2007-01-18 18:10:50  tino
+Spelling errors corrected
 
+Revision 1.1  2004/08/22 05:52:30  Administrator
+Intermediate version for search functionality
