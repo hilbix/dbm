@@ -1,4 +1,4 @@
-Major overhaul:
+Major overhaul: (For some time it's probably more safe to use the 0.8.2!)
 - import and export commands.
 - "Advanced timeout" which closes DB while in blocking reads/writes.
 - Also little change in "bget" command to be more intuitive.
