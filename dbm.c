@@ -22,7 +22,10 @@
  * USA
  *
  * $Log$
- * Revision 1.19  2007-01-18 18:12:38  tino
+ * Revision 1.20  2007-01-23 17:08:42  tino
+ * Another try if everything works
+ *
+ * Revision 1.19  2007/01/18 18:12:38  tino
  * Lot of changes, see ChangeLog and ANNOUNCE.  Commit before function checks.
  *
  * Revision 1.18  2007/01/13 01:03:59  tino
@@ -99,6 +102,23 @@
 #include "dbm_version.h"
 #include "tino_memwild.h"
 
+#if 1
+#define	DP(X)	do { ; } while (0)
+#else
+#define	DP(X)	do { dprintf X; } while (0)
+static void
+dprintf(const char *s, ...)
+{
+  va_list	list;
+
+  fprintf(stderr, "[");
+  va_start(list, s);
+  vfprintf(stderr, s, list);
+  va_end(list);
+  fprintf(stderr, "]\n");
+}
+#endif
+
 static int ignoresleep, advancedsleep;
 static const char	*db_name;
 
@@ -122,9 +142,9 @@ ex(int nr, const char *s, ...)
       fprintf(stderr, "error");
     }
   if (db_name)
-    fprintf(stderr, " %s:", db_name);
+    fprintf(stderr, " %s: ", db_name);
   else
-    fprintf(stderr, ":");
+    fprintf(stderr, ": ");
   va_start(list, s);
   vfprintf(stderr, s, list);
   va_end(list);
@@ -666,7 +686,7 @@ read_key_term_s(const char *term)
   l	= term[len];
   for (i=0; (c=getchar())!=EOF; i++)
     {
-      if (c==l && i>=len && !memcmp(kbuf.dptr+i-len, term, len))
+      if (c==l && i>=len && (!len || !memcmp(kbuf.dptr+i-len, term, len)))
         {
 	  i	-= len;
 	  break;
@@ -678,6 +698,7 @@ read_key_term_s(const char *term)
 #endif
   key		= kbuf;
   key.dsize	= i;
+  DP(("term_s: %.*s", i, kbuf));
   return c;
 }
 
@@ -890,23 +911,6 @@ c_bget0(int argc, char **argv)
     dobget(argv, sep);
 }
 
-#if 1
-#define	DP(X)	do { ; } while (0)
-#else
-#define	DP(X)	do { dprintf X; } while (0)
-static void
-dprintf(const char *s, ...)
-{
-  va_list	list;
-
-  fprintf(stderr, "[");
-  va_start(list, s);
-  vfprintf(stderr, s, list);
-  va_end(list);
-  fprintf(stderr, "]\n");
-}
-#endif
-
 static void
 c_filter(int argc, char **argv)
 {
@@ -1009,7 +1013,7 @@ xmlescape(const unsigned char *ptr, size_t len, const char *format)
     if ((c= *ptr++)<' ' || c==127	/* not needed but nice to have	*/
 	|| c=='&' || c=='<'		/* escapes for element contents	*/
 	|| c=='>'		/* must be escaped for simple parsing	*/
-	|| c=='"' || c=='\''		/* escapes for arguments	*/
+	|| c=='"' || c=='\''		/* escapes for attributes	*/
 	)
       printf(format, c);
     else
@@ -1034,7 +1038,7 @@ c_export(int argc, char **argv)
   db_open(argv[0], GDBM_READER, NULL);
   /* We use ISO-8859-1 as the default
    */
-  printf("<?xml version=\"1.0\" encoding=\"%s\" standalone=\"yes\" ?>\n", argc>0 ? argv[1] : "ISO-8859-1");
+  printf("<?xml version=\"1.0\" encoding=\"%s\" standalone=\"yes\" ?>\n", argc>0 && argv[1][0] ? argv[1] : "ISO-8859-1");
   printf("<dbm name=\"");
   xmlescape(argv[0], strlen(argv[0]), NULL);
   time(&tim);
@@ -1061,14 +1065,15 @@ xmlcmp(const char *s)
 {
   size_t len;
 
+  DP(("1 %s", s));
   len	= strlen(s);
-  return (key.dsize<len || (!len && memcmp(key.dptr, s, len)));
+  return (key.dsize<len || (len && memcmp(key.dptr, s, len)));
 }
 
 static void
 xmlget(void)
 {
-  if (read_key_term_s("<") && !key.dsize)
+  if (read_key_term_s("<")==EOF && !key.dsize)
     ex(0, "unexpected end of file");
 }
 
@@ -1086,14 +1091,15 @@ xmlcmp2(const char *s)
 {
   size_t len;
 
+  DP(("2 %s", s));
   len	= strlen(s);
-  return (data.dsize<len || (!len && memcmp(data.dptr, s, len)));
+  return (data.dsize<len || (len && memcmp(data.dptr, s, len)));
 }
 
 static void
 xmlget2(void)
 {
-  if (read_data_term_s("<") && !data.dsize)
+  if (read_data_term_s("<")==EOF && !data.dsize)
     ex(0, "unexpected end of file");
 }
 
@@ -1102,6 +1108,54 @@ xmlskip2(const char *s)
 {
   xmlget2();
   return xmlcmp2(s);
+}
+
+static void
+xmlunescape(datum *d, int off, int row)
+{
+  int	n;
+
+  n	= 0;
+  while (off<d->dsize)
+    {
+      unsigned char	c;
+
+      if ((c=d->dptr[off++])=='&')
+	{
+	  int	i;
+
+	  /* decode an entity &#nnn; or &#xHH;
+	   */
+	  i	= 0;
+	  for (;;)
+	    {
+	      if (++i<6 && off+i<d->dsize)
+		{
+		  if (d->dptr[off+i]!=';')
+		    continue;
+		  if (d->dptr[off++]=='#')
+		    {
+		      long	tmp;
+		      char	*end;
+
+		      /* we either have nnn; or xHH;
+		       */
+		      tmp	= (d->dptr[off]=='x'
+				   ? strtoul(d->dptr+off+1, &end, 16)
+				   : strtoul(d->dptr+off, &end, 10)
+				   );
+		      off	+= i;
+		      c		= tmp;
+		      if (tmp==(long)c && end && *end==';')
+			break;
+		    }
+		}
+	      ex(0, "wrong entity encoding in row %d", row);
+	    }
+	}
+      d->dptr[n++]	= c;
+    }
+  d->dsize	= n;
 }
 
 /* This is supposed to be able to read what export wrote,
@@ -1120,19 +1174,17 @@ c_import(int argc, char **argv)
   if (xmlskip("") || xmlskip("?xml ") || xmlskip("dbm "))
     ex(0, "parse error in header");
   row	= 0;
-  while (xmlskip("row "))
+  while (!xmlskip("row ") || !xmlcmp("row>"))
     {
       row++;
       if (xmlskip("key>"))
         ex(0, "key-tag expected in row %d", row);
-      if (xmlskip2("/row>"))
+      if (xmlskip2("/key>"))
         ex(0, "key-tag not closed in row %d", row);
       if (xmlskip2("data>"))
         ex(0, "data-tag expected in row %d", row);
-      key.dptr	+= 4;
-      key.dsize	-= 4;
-      data.dptr	+= 5;
-      data.dsize-= 5;
+      xmlunescape(&key,  4, row);
+      xmlunescape(&data, 5, row);
       db_put(argv[0],0,0);
       /* We do not need to adjust the key/data pointers as they came
        * from the global read-buffers.
@@ -1143,6 +1195,7 @@ c_import(int argc, char **argv)
       if (xmlskip("/row>"))
         ex(0, "row-tag not properly closed in row %d", row);
     }
+  DP(("import end"));
   if (xmlcmp("/dbm>"))
     ex(0, "missing row-tag/dbm-tag not properly closed in row %d", row);
 }
