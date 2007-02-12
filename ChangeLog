@@ -1,3 +1,17 @@
+2007-02-12    <tino@firebird.03.softkill.net>
+
+	* test.sh: improved tests
+
+2007-01-27    <tino@firebird.03.softkill.net>
+
+	* dbm.c (read_key_term_c, read_key_term_s): BUGFIX.  When the
+	first read data was empty then kbuf staied NULL, therefor GDBM
+	told an error, even when dsize=0.  Seems to be a GDBM feature.
+
+2007-01-23    <tino@firebird.03.softkill.net>
+
+	* dbm.c (get_ul): added for breviness
+
 2007-01-18    <tino@firebird.03.softkill.net>
 
 	* dbm.c (run): main() splitted into 2 routines, as the old main

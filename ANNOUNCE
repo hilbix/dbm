@@ -1,3 +1,4 @@
+Bugfix: Storing an empty key via batch/nbatch did not work (OOPS!)
 Major overhaul: (For some time it's probably more safe to use the 0.8.2!)
 - import and export commands.
 - "Advanced timeout" which closes DB while in blocking reads/writes.
