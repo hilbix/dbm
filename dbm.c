@@ -22,7 +22,10 @@
  * USA
  *
  * $Log$
- * Revision 1.21  2007-03-26 16:19:20  tino
+ * Revision 1.22  2007-03-26 18:21:56  tino
+ * Bugfix: db_cmp() had sideffects
+ *
+ * Revision 1.21  2007/03/26 16:19:20  tino
  * XML now usable (hopefully).
  * Also major overhaul of some parts.
  * Better timeout handling.
@@ -391,15 +394,19 @@ static void
 db_cmp(const char *val)
 {
   datum	old;
+  int	oalloc;
 
   old		= data;
+  oalloc	= data_alloc;
   data.dptr	= 0;
   db_get();
   if (!data.dptr)
     ex(1, "key does not exist: %.*s", (int)key.dsize, key.dptr);
   if (data.dsize!=strlen(val) || memcmp(data.dptr,val,data.dsize))
     ex(2, "key data mismatch: %.*s", (int)key.dsize, key.dptr);
+  data_free();
   data		= old;
+  data_alloc	= oalloc;
 }
 
 static void
