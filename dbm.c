@@ -22,7 +22,14 @@
  * USA
  *
  * $Log$
- * Revision 1.20  2007-01-23 17:08:42  tino
+ * Revision 1.21  2007-03-26 16:19:20  tino
+ * XML now usable (hopefully).
+ * Also major overhaul of some parts.
+ * Better timeout handling.
+ * Server part incomplete. (just an idea which may vanish again)
+ * Export mode incomplete. (will change a lot in future)
+ *
+ * Revision 1.20  2007/01/23 17:08:42  tino
  * Another try if everything works
  *
  * Revision 1.19  2007/01/18 18:12:38  tino
@@ -99,6 +106,14 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
+#if 0
+#define	DBM_SERVER		/* Allow server mode	*/
+#endif
+
+#ifdef DBM_SERVER
+#include <sys/socket.h>
+#endif
+
 #include "dbm_version.h"
 #include "tino_memwild.h"
 
@@ -169,6 +184,18 @@ fatal_func(const char *s)
   ex(0, "gdbm fatal: %s\n", s);
 }
 
+static unsigned long
+get_ul(const char *arg)
+{
+  unsigned long	n;
+  char		*end;
+
+  n	= strtoul(arg, &end, 0);
+  if (!end || *end)
+    ex(0, "wrong value: %s", arg);
+  return n;
+}
+
 static GDBM_FILE	db;
 static int		timeout;
 static datum		key, data, kbuf, kbuf2;
@@ -195,8 +222,11 @@ db_open(char *name, int mode, const char *type)
   db_name	= name;
   if (!type)
     type	= "open";
-  if (mode!=GDBM_WRCREAT && lstat(name, &st))
-    ex(0, "database missing");
+  if (mode!=GDBM_WRCREAT)
+    {
+      if (stat(name, &st))
+	ex(0, "database missing");
+    }
   while ((db=gdbm_open(name, BUFSIZ, mode, 0775, fatal_func))==0)
     {
       if (errno==EBUSY || gdbm_errno==GDBM_CANT_BE_READER || gdbm_errno==GDBM_CANT_BE_WRITER)
@@ -311,6 +341,19 @@ db_data(int argc, char **argv)
     }
 }
 
+/* db_data() but does never read from stdin
+ *
+ * This function is completely superfluous, but makes it more easy to
+ * understand what's going on.
+ */
+static void
+db_data_noread(int argc /* must be 0 */, char **argv)
+{
+  if (argc<0)
+    ex(0, "too few parameters");
+  db_data(argc, argv);
+}
+
 static int
 db_put(char *name, int replace, int check)
 {
@@ -336,20 +379,27 @@ db_store(int argc, char **argv, int flag, int check)
 }
 
 static void
-db_replace(datum d)
+db_replace(void)
 {
-  if (gdbm_store(db, key, d, GDBM_REPLACE))
-    ex(2, "cannot store %.*s into %.*s", (int)d.dsize, d.dptr, (int)key.dsize, key.dptr);
+  if (gdbm_store(db, key, data, GDBM_REPLACE))
+    ex(2, "cannot store %.*s into %.*s", (int)data.dsize, data.dptr, (int)key.dsize, key.dptr);
 }
 
+/* Saves data such that there is no sideeffect
+ */
 static void
 db_cmp(const char *val)
 {
+  datum	old;
+
+  old		= data;
+  data.dptr	= 0;
   db_get();
   if (!data.dptr)
     ex(1, "key does not exist: %.*s", (int)key.dsize, key.dptr);
   if (data.dsize!=strlen(val) || memcmp(data.dptr,val,data.dsize))
     ex(2, "key data mismatch: %.*s", (int)key.dsize, key.dptr);
+  data		= old;
 }
 
 static void
@@ -397,16 +447,12 @@ static void
 c_list(int argc, char **argv)
 {
   unsigned long	n, i;
-  char		*end, *sep;
+  char		*sep;
   size_t	seplen;
 
   n	= 1;
   if (argc>0)
-    {
-      n	= strtoul(argv[1], &end, 0);
-      if (!end || *end)
-	ex(0, "wrong value: %s", argv[1]);
-    }
+    n	= get_ul(argv[1]);
   db_open(argv[0], GDBM_READER, NULL);
   if (!db_first())
     ex(1, "empty database");
@@ -485,15 +531,10 @@ static void
 c_dump(int argc, char **argv)
 {
   unsigned long	n, i;
-  char		*end;
 
   n	= 0;
   if (argc)
-    {
-      n	= strtoul(argv[1], &end, 0);
-      if (!end || *end)
-	ex(0, "wrong value: %s", argv[1]);
-    }
+    n	= get_ul(argv[1]);
   db_open(argv[0], GDBM_READER, NULL);
   if (!db_first())
     ex(1, "empty database");
@@ -528,21 +569,11 @@ c_update(int argc, char **argv)
 static void
 c_alter(int argc, char **argv)
 {
-  datum	o;
-
   db_data(argc-3, argv+3);
-
-  /* ugly hack:
-   *
-   * db_cmp kills datum data
-   */
-  o		= data;
-  data.dptr	= 0;
-
   db_open(argv[0], GDBM_WRITER, NULL);
   db_key(argv[1]);
-  db_cmp(argv[2]);
-  db_replace(o);
+  db_cmp(argv[2]);		/* does not alter struct data!	*/
+  db_replace();
 }
 
 static void
@@ -551,8 +582,8 @@ batch_alter(int argc, char **argv)
   if (!db)
     db_open(argv[0], GDBM_WRITER, NULL);
   db_cmp(argv[1]);
-  db_data(argc-2, argv+2);	/* does not read from stdin	*/
-  db_replace(data);
+  db_data_noread(argc-2, argv+2);
+  db_replace();
 }
 
 static void
@@ -577,10 +608,10 @@ c_get(int argc, char **argv)
 static void
 batch_store(int argc, char **argv)
 {
-  db_data(0, argv+1);	/* does not read from stdin	*/
+  db_data_noread(0, argv+1);
   if (db_put(argv[0], 0, (argc>1 ? -1 : 0)))
     {
-      db_data(0, argv+2);	/* dito	*/
+      db_data_noread(0, argv+2);
       db_put(argv[0], 1, 0);
     }
   db_close_if();
@@ -603,6 +634,7 @@ read_key_term_c(int term)
   int	i, c;
 
   db_close_if();
+  kbuf_set(0,0);
   for (i=0; (c=getchar())!=EOF && c!=term; i++)
     kbuf_set(i, c);
   key		= kbuf;
@@ -674,6 +706,7 @@ read_key_term_s(const char *term)
   size_t	len;
 
   db_close_if();
+  kbuf_set(0,0);
   if (!*term)
     {
       for (i=0; (c=getchar())!=EOF && !isspace(c); i++)
@@ -796,13 +829,10 @@ static void
 hunt(int match, int wild, int argc, char **argv)
 {
   unsigned long	n, i;
-  char		*end;
   int		*tot=alloca((argc+1)*sizeof *tot);
   int		j;
 
-  n	= strtoul(argv[1], &end, 0);
-  if (!end || *end)
-    ex(0, "wrong value: %s", argv[1]);
+  n	= get_ul(argv[1]);
 
   db_open(argv[0], GDBM_READER, NULL);
   if (!db_first())
@@ -1001,6 +1031,16 @@ c_filter(int argc, char **argv)
     }
 }
 
+static int
+xmlspecial(unsigned char c)
+{
+  return (c<' ' || c==127	/* not needed but nice to have	*/
+	  || c=='&' || c=='<'		/* escapes for element contents	*/
+	  || c=='>'		/* must be escaped for simple parsing	*/
+	  || c=='"' || c=='\''		/* escapes for attributes	*/
+	  );
+}
+
 static void
 xmlescape(const unsigned char *ptr, size_t len, const char *format)
 {
@@ -1010,22 +1050,118 @@ xmlescape(const unsigned char *ptr, size_t len, const char *format)
   if (!format)
     format	= "&#%d;";
   for (i=len; --i>=0; )
-    if ((c= *ptr++)<' ' || c==127	/* not needed but nice to have	*/
-	|| c=='&' || c=='<'		/* escapes for element contents	*/
-	|| c=='>'		/* must be escaped for simple parsing	*/
-	|| c=='"' || c=='\''		/* escapes for attributes	*/
-	)
+    if (xmlspecial(c= *ptr++))
       printf(format, c);
     else
       putchar(c);
 }
 
-static void
-xmldump(const unsigned char *ptr, size_t len, const char *ele)
+static int
+xmlplaintext(const unsigned char *ptr, size_t len)
 {
-  printf("  <%s>", ele);
-  xmlescape(ptr, len, NULL);
-  printf("</%s>\n", ele);
+  while (len)
+    if (xmlspecial(*ptr++))
+      return 0;
+  return 1;
+}
+
+#if 0
+#ifndef XML_ENCODING_TABLE_GEN
+static unsigned char xml_encoding_n_to_char[] =
+  {
+#include "dbm_xmlenc.h"
+  };
+#else
+/* To create xml_encoding_n_to_char:
+
+make distclean
+
+make LDFLAGS=-lm CFLAGS=-DXML_ENCODING_TABLE_GEN dbm
+
+./dbm > dbm_xmlenc.h
+
+make distclean
+
+ */
+#include <math.h>
+
+int
+main(int argc, char **argv)
+{
+  int	i, j;
+
+  /* 0=none 1=hex 2=base32 4=base64
+   */
+  printf("0, 0, 1");
+  j	= 3;
+  for (i=0; i<=217; i++)
+    if (j==(int)((double)log(i)/(double)(log(256.l)-log((double)i))+0.0000000001l))
+      {
+	printf(", %d", i);
+	j++;
+      }
+  printf("\n");
+  return 0;
+}
+static unsigned char xml_encoding_n_to_char[] = {};
+#endif
+
+static void
+xmlencode(int base, int miniblock, const unsigned char *ptr, size_t len)
+{
+  int		bits;
+  unsigned long	accu, mult;
+
+  accu	= 0;
+  mult	= 1;
+  while (len || mult>0)
+    {
+      if (mult<base && lne
+    }
+  000;
+}
+#endif
+
+static void
+xmldump(int mode, const unsigned char *ptr, size_t len, const char *ele)
+{
+  if (mode<=0 || xmlplaintext(ptr, len))
+    {
+      printf("<%s>", ele);
+      xmlescape(ptr, len, NULL);	/* no escapes needed	*/
+      printf("</%s>", ele);
+      return;
+    }
+  ex(0, "mode=%d not yet implemented", mode);
+#if 0
+  if (mode>=sizeof xml_encoding_n_to_char/sizeof *xml_encoding_n_to_char)
+    mode	= sizeof xml_encoding_n_to_char/sizeof *xml_encoding_n_to_char;
+  switch (xml_encoding_n_to_char[mode])
+    {
+    case 0:
+      printf("<%s code=\"hex\">", ele);
+      xmlencode(16, 1, ptr, len);
+      printf("</%s>", ele);
+      return;
+
+    case 1:
+      printf("<%s code=\"base32\">", ele);
+      xmlencode(32, 5, ptr, len);
+      printf("</%s>", ele);
+      return;
+      
+    case 64:
+      printf("<%s code=\"base64\">", ele);
+      break;
+
+    default:
+      printf("<%s code=\"%d\">", ele, mode);
+      break;
+    }
+  xmlencode(xml_encoding_n_to_char[mode], mode, ptr, len);
+  printf("</%s>", ele);
+  ex(0, "mode=%d not yet implemented", mode);
+#endif
 }
 
 static void
@@ -1033,12 +1169,16 @@ c_export(int argc, char **argv)
 {
   time_t	tim;
   struct tm	*tm;
-  int		row;
+  int		row, mode;
+
+  mode		= -1;
+  if (argc)
+    mode	= get_ul(argv[1]);
 
   db_open(argv[0], GDBM_READER, NULL);
   /* We use ISO-8859-1 as the default
    */
-  printf("<?xml version=\"1.0\" encoding=\"%s\" standalone=\"yes\" ?>\n", argc>0 && argv[1][0] ? argv[1] : "ISO-8859-1");
+  printf("<?xml version=\"1.0\" encoding=\"%s\" standalone=\"yes\" ?>\n", argc>1 && argv[2][0] ? argv[2] : "ISO-8859-1");
   printf("<dbm name=\"");
   xmlescape(argv[0], strlen(argv[0]), NULL);
   time(&tim);
@@ -1050,11 +1190,11 @@ c_export(int argc, char **argv)
   if (db_first())
     do
       {
-	printf(" <row n=\"%d\">\n", ++row);
-	xmldump(key.dptr,  key.dsize, "key");
+	printf(" <row n=\"%d\">\n  ", ++row);
+	xmldump(mode, key.dptr,  key.dsize, "key");
 	db_get();
-	xmldump(data.dptr, data.dsize, "data");
-	printf(" </row>\n");
+	xmldump(mode, data.dptr, data.dsize, "data");
+	printf("\n </row>\n");
       } while (db_next());
   printf("</dbm>\n");
   printf("<!-- %d rows -->\n", row);
@@ -1070,11 +1210,21 @@ xmlcmp(const char *s)
   return (key.dsize<len || (len && memcmp(key.dptr, s, len)));
 }
 
+/* Tries to ignore XML comments
+ *
+ * Heuristics is not real XML (this uses '-- comment --') but '<!' as
+ * in <!-- comment -->
+ */
 static void
 xmlget(void)
 {
-  if (read_key_term_s("<")==EOF && !key.dsize)
-    ex(0, "unexpected end of file");
+  for (;;)
+    {
+      if (read_key_term_s("<")==EOF && !key.dsize)
+	ex(0, "unexpected end of file");
+      if (key.dptr[0]!='!')
+	return;
+    }
 }
 
 static int
@@ -1096,6 +1246,9 @@ xmlcmp2(const char *s)
   return (data.dsize<len || (len && memcmp(data.dptr, s, len)));
 }
 
+/* Does not need to ignore XML comments.
+ * You must not insert comments between key and data!
+ */
 static void
 xmlget2(void)
 {
@@ -1110,11 +1263,34 @@ xmlskip2(const char *s)
   return xmlcmp2(s);
 }
 
+/* Note that this is not able to skip > in arguments,
+ * so '>' *MUST* be escaped, always!
+ */
 static void
-xmlunescape(datum *d, int off, int row)
+xmlunescape(datum *d, int row)
 {
   int	n;
+  int	off;
 
+  off	= -1;
+  for (n=0; n<d->dsize; n++)
+    {
+      if (d->dptr[n]=='>')
+	{
+	  if (off>=0)
+	    ex(0, "double '>' found in row %d: entry %.4s", row, d->dptr);
+	  off	= n+1;
+	}
+      /* look for code	*/
+      if (off<0 && d->dptr[n]==' ')
+	{
+	  ex(0, "code setting not implemented in this version");
+	  000;
+	}
+    }
+  if (off<0)
+    ex(0, "incomplete entry or unescaped '<' in row %d: entry %.4s", row, d->dptr);
+    
   n	= 0;
   while (off<d->dsize)
     {
@@ -1177,14 +1353,14 @@ c_import(int argc, char **argv)
   while (!xmlskip("row ") || !xmlcmp("row>"))
     {
       row++;
-      if (xmlskip("key>"))
+      if (xmlskip("key>"))	/* reads in key	*/
         ex(0, "key-tag expected in row %d", row);
       if (xmlskip2("/key>"))
         ex(0, "key-tag not closed in row %d", row);
-      if (xmlskip2("data>"))
+      if (xmlskip2("data>"))	/* reads in data	*/
         ex(0, "data-tag expected in row %d", row);
-      xmlunescape(&key,  4, row);
-      xmlunescape(&data, 5, row);
+      xmlunescape(&key,  row);
+      xmlunescape(&data, row);
       db_put(argv[0],0,0);
       /* We do not need to adjust the key/data pointers as they came
        * from the global read-buffers.
@@ -1200,6 +1376,40 @@ c_import(int argc, char **argv)
     ex(0, "missing row-tag/dbm-tag not properly closed in row %d", row);
 }
 
+#ifdef DBM_SERVER
+/* not yet ready
+ */
+static void
+c_server(int argc, char **argv)
+{
+  struct sockaddr_un	sun;
+  int			sock;
+  int			max;
+
+  sun.sun_family    = AF_UNIX;
+
+  max = strlen(argv[1]);
+  if (max > sizeof(sun.sun_path)-1)
+    ex(0, "socket argument too long");
+  strncpy(sun.sun_path, argv[1], sizeof(sun.sun_path));
+  sun.sun_path[sizeof(sun.sun_path)-1]	= 0;
+
+  max += sizeof sun.sun_family;
+
+  sock	= socket(sun.sun_family, SOCK_STREAM, 0);
+  if (sock<0)
+    ex(0, "cannot create socket");
+
+  if (bind(sock, (struct sockaddr *)&sun, max+sizeof sun.sun_family))
+    ex(0, "cannot create socket");
+
+  if (listen(sock, do_listen))
+    ex(0, "cannot listen");
+
+  000;
+}
+#endif
+
 struct
   {
     const char	*command;
@@ -1207,12 +1417,16 @@ struct
     int		minargs, maxargs;
   } actions[] =
   {
+#ifdef DBM_SERVER
+    { "server", c_server,	1, 1	},
+    { "term",	c_term,		1, 1	},
+#endif
     { "create",	c_create,	0, 0 	},
     { "kill",	c_kill,		0, 0	},
     { "reorg",	c_reorg,	0, 0	},
     { "list",	c_list,		0, 2	},
     { "dump",	c_dump,		0, 1	},
-    { "export",	c_export,	0, 1	},
+    { "export",	c_export,	0, 2	},
     { "import",	c_import,	0, 1	},
     { "insert",	c_insert,	1, 2	},
     { "replace",c_replace,	1, 2	},
@@ -1241,6 +1455,7 @@ struct
 
 static int run(int argc, char **argv);
 
+#ifndef XML_ENCODING_TABLE_GEN
 int
 main(int argc, char **argv)
 {
@@ -1272,17 +1487,33 @@ main(int argc, char **argv)
 	     "\n"
 	     "\tAction	Args	Description:\n"
 	     "\t-------	-------	------------\n"
+#ifdef DBM_SERVER
+	     "\tterm	gdbm	terminate server.  Argument is gdbm-file (safety)\n"
+	     "\tserver	socket	run in server mode, argument is socket to listen\n"
+	     "\t		Client is automatic if gdbm-file is the socket\n"
+	     "\t		Warning! The server only runs single threaded!\n"
+	     "\t		Long running actions block other commands.\n"
+#endif
 	     "\tcreate	-	create new DBM file, fails if exists\n"
 	     "\tkill	-	erase DBM file if empty\n"
-	     "\treorg	-	reorganize DBM (fails under CygWin?!?)\n"
+	     "\treorg	-	reorganize DBM (fails under CygWin, see ex/import)\n"
 	     "\n"
 	     "\tlist	[n [p]]	write n keys to stdout, default 1, 0=all\n"
 	     "\t		p is the line terminator, default LF, '' for NUL\n"
 	     "\tdump	[n]	diagnostic dump, default 0=all\n"
-	     "\texport	[c]	dump database to some XML like output\n"
-	     "\t		c is the character encoding, default ISO-8859-1\n"
 	     "\timport	[file]	read database from what export wrote\n"
-	     "\t		Please note that DBM does not parse encodings!\n"
+	     "\t		Please note that DBM does not parse XML!\n"
+	     "\t		It reads '<' separated files with heuristics.\n"
+	     "\texport	[m [e]]	dump database to some XML like output\n"
+	     "\t		It is guaranteed, that no ' is in the export.\n"
+	     "\t		e is the character encoding, default ISO-8859-1\n"
+#if 1
+	     "\t		m must be 0 for now\n"
+#else
+	     "\t		m is 'm-1 to m character encoding'. 0=none, 32=max\n"
+	     "\t		XML parsers dislike m=0 (entities below &#32;)\n"
+	     "\t		RFC3548 without padding: 1=hex 2=base32 4=base64\n"
+#endif
 	     "\n"
 	     "\tinsert	key [d]	insert d(ata) under key, must not exist\n"
 	     "\t		If d is missing, data is read from stdin\n"
@@ -1336,6 +1567,7 @@ main(int argc, char **argv)
     }
   return run(argc, argv);
 }
+#endif
 
 static int
 run(int argc, char **argv)
