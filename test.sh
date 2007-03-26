@@ -6,7 +6,10 @@
 # I am just too clumsy.
 #
 # $Log$
-# Revision 1.3  2007-02-12 19:15:17  tino
+# Revision 1.4  2007-03-26 16:16:54  tino
+# Made XML better sortable, therefor the TEST xml changed.
+#
+# Revision 1.3  2007/02/12 19:15:17  tino
 # Preparing dist: See ChangeLog
 #
 # Revision 1.2  2006/08/09 23:13:17  tino
@@ -116,8 +119,7 @@ cat > TEST.db.xml <<EOF
 <?xml version="1.0" encoding="ISO-8859-1" standalone="yes" ?>
 <dbm name="TEST.db">
  <row n="1">
-  <key>t1</key>
-  <data>d3&#10;</data>
+  <key>t1</key><data>d3&#10;</data>
  </row>
 </dbm>
 <!-- 1 rows -->
