@@ -1,1 +1,1 @@
-CygWin bufix release
+Bugfix: balter did not work (bug in db_cmp() removed)
