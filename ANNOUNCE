@@ -55,7 +55,7 @@ dbm -a-1 nbatch DB/check ko
 }
 </pre>
 
-Alternatively with files without TABs:
+Alternatively with files with filenames without TABs:
 
 <pre>
 find dir -type f -print |
@@ -101,10 +101,10 @@ viri.  This is even more complicated if the virus scanner runs under
 the thread priority of the process, as then slow processes can lead to
 hours (literally!) of unusable DBMs.
 
-Thats not a bug of DBM.  It's a fundamental design flaw of online
-virus scanners under Windows.  So the only advice I can give is: Under
-windows never even try to open DBM files concurrently while an online
-virus scanner is active.  Period.
+<b>Thats not a bug of DBM.  It's a fundamental design flaw of online
+virus scanners under Windows.</b> So the only advice I can give is:
+Under windows never even try to open DBM files concurrently while an
+online virus scanner is active.  Period.
 
 Side-Advice: <b>If you do not have a virus</b> but some computer
 problem, then try to switch off the online virus scanner first.  Often
