@@ -1,7 +1,10 @@
 A little tool to access gdbm files from shell.
 # $Header$
 # $Log$
-# Revision 1.4  2007-04-07 19:03:58  tino
+# Revision 1.5  2007-04-07 19:07:33  tino
+# typo
+#
+# Revision 1.4  2007/04/07 19:03:58  tino
 # Output pipe breaks now shall terminate DBM correctly
 #
 # Revision 1.3  2007/01/18 18:11:40  tino
@@ -46,7 +49,7 @@ accessing one eMail sometimes takes over a minute.  I just switch off
 my antivirus, and voilla, everything is fine again.)
 
 <b>Due to online virus scanners I have lost more data than due to
-viri!<b> Yes, that's true.  I lost data which never can be brought
+viri!</b> Yes, that's true.  I lost data which never can be brought
 back.  You cannot buy it anywhere, you cannot recreate.  It just
 vanished.  Due to antivirus scanners rendering systems unresponsive.
 This is far more data than I ever lost due to a virus.  So if you are
