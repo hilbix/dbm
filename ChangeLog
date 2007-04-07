@@ -1,3 +1,9 @@
+2007-04-07    <tino@firebird.03.softkill.net>
+
+	* dbm.c (check_stdout): added.  All routines which output data now
+	are supposed to call check_eof() in the loop to abort when the
+	output pipe goes away.
+
 2007-03-26    <tino@firebird.03.softkill.net>
 
 	* dbm.c (db_cmp): bugfix: data_alloc could be set, such that

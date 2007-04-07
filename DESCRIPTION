@@ -1,7 +1,10 @@
 A little tool to access gdbm files from shell.
 # $Header$
 # $Log$
-# Revision 1.3  2007-01-18 18:11:40  tino
+# Revision 1.4  2007-04-07 19:03:58  tino
+# Output pipe breaks now shall terminate DBM correctly
+#
+# Revision 1.3  2007/01/18 18:11:40  tino
 # Prep new dist
 #
 # Revision 1.2  2006/04/11 23:26:00  tino
@@ -10,7 +13,58 @@ A little tool to access gdbm files from shell.
 # Revision 1.1  2004/12/13 23:57:54  tino
 # added
 
-<b>This here is deprecated, but I have no time to create a
+<hr>
+
+Any questions why there is no database driven filesystem under Vista?
+DBM reveals the fact: On demand access to database tables, like DBM
+does, is impossible under Windows if there is an active filesystem
+protection like an online virus scanner.
+
+<b>Thus you have been warned!</b> If you use this program under
+CygWin, <b>disable your online virus scanner</b>.
+
+DBM reveals <b>an important and very basic security flaw of all virus
+scanner products under Windows</b>.  It shows, that all online virus
+scanners under Windows do not work.  Yes, it's that simple.  DBM has
+no flaw.  It just trips over bugs in online virus protection of
+Windows.
+
+The virus scanners are buggy.  Alltogether.  Each product out there.
+There is none which functions, because the methods used for online
+virus scanning cannot work as designed.  DBM reveals that simple truth
+noboy else is telling you.
+
+(Note that I cannot even read my eMail while online virus scanners are
+active, as accessing one single eMail takes over 10 minute then.  This
+is due to online virus protection.  Switching it off gets back to
+below 1 second access to my eMails.  Why?  Because scanning some
+Gigabytes of eMail just takes its time.  And AFAICS Outlook read a lot
+eMails unneccessarily until it reaches the right one to display.
+Well, it's not my fault that I have attachments with archives which
+contain other archives to several levels deep.  I don't accept that
+accessing one eMail sometimes takes over a minute.  I just switch off
+my antivirus, and voilla, everything is fine again.)
+
+<b>Due to online virus scanners I have lost more data than due to
+viri!<b> Yes, that's true.  I lost data which never can be brought
+back.  You cannot buy it anywhere, you cannot recreate.  It just
+vanished.  Due to antivirus scanners rendering systems unresponsive.
+This is far more data than I ever lost due to a virus.  So if you are
+careful <b>antivirus products are more harmful than the virus
+threat</b>.  But no, I don't tell you to switch off your antivirus!
+If you don't know exactly what you are doing and you are aware of all
+possible facts (which I cannot tell you) then don't ever switch it
+off!  Having no antivirus is like sex without a condome.  Yes, if you
+know the person you sleep with you can leave it away (to make a child,
+for example), but <b>for normal people antivirus is better</b>.
+However if you use DBM, be sure never to access one database file
+concurrently with two DBM instances while online virus protection is
+active.  <b>This will fail when you don't expect it to fail!</b> You
+have been warned.
+
+<hr>
+
+<b>Note that DBM is deprecated, but I have no time to create a
 replacement</b>
 
 DBM began as a quick hack just to access gdbm files from the

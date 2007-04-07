@@ -22,7 +22,10 @@
  * USA
  *
  * $Log$
- * Revision 1.22  2007-03-26 18:21:56  tino
+ * Revision 1.23  2007-04-07 19:03:58  tino
+ * Output pipe breaks now shall terminate DBM correctly
+ *
+ * Revision 1.22  2007/03/26 18:21:56  tino
  * Bugfix: db_cmp() had sideffects
  *
  * Revision 1.21  2007/03/26 16:19:20  tino
@@ -197,6 +200,13 @@ get_ul(const char *arg)
   if (!end || *end)
     ex(0, "wrong value: %s", arg);
   return n;
+}
+
+static void
+check_eof(void)
+{
+  if (ferror(stdout) || feof(stdout))
+    exit(11);
 }
 
 static GDBM_FILE	db;
@@ -467,7 +477,8 @@ c_list(int argc, char **argv)
   seplen	= *sep ? strlen(sep) : 1;
   for (i=0;
        fwrite(key.dptr, key.dsize, 1, stdout), (!n || ++i<n) && db_next();
-       fwrite(sep, seplen, 1, stdout));
+       fwrite(sep, seplen, 1, stdout))
+    check_eof();
 }
 
 #define	DUMPWIDTH	65	/* 32 for HEX, 64 for ascii	*/
@@ -531,6 +542,7 @@ dump(const void *ptr, size_t len, const char *title)
       printf("%s %04x ", title, i);
       i	= dumpline(ptr, len, i);
       printf("\n");
+      check_eof();
     } while (i<len);
 }
 
@@ -610,6 +622,7 @@ c_get(int argc, char **argv)
     exit(1);	/* no data, print nothing, common case!	*/
   db_close_if();
   fwrite(data.dptr, data.dsize, 1, stdout);
+  check_eof();
 }
 
 static void
@@ -869,6 +882,7 @@ hunt(int match, int wild, int argc, char **argv)
 	{
 	  fwrite(key.dptr, key.dsize, 1, stdout);
 	  putchar('\n');
+	  check_eof();
 	  if (n && ++i>=n)
 	    return;
 	}
@@ -916,9 +930,11 @@ dobget(char **argv, char *sep)
       if (!seplen)
 	seplen	= *sep ? strlen(sep) : 1;
       fwrite(sep, seplen, 1, stdout);
+      check_eof();
     }
   fwrite(data.dptr, data.dsize, 1, stdout);
   putchar('\n');
+  check_eof();
 }
 
 static void
@@ -964,7 +980,7 @@ c_filter(int argc, char **argv)
   p	= *term ? *term++!='0' : 0;
   if (!*term)
     term	= "\n";
-  for (i=0; !feof(stdout) && ((c=read_key_term_s(term))!=EOF || key.dsize); i++)
+  for (i=0; ((c=read_key_term_s(term))!=EOF || key.dsize); i++)
     {
       if (!db)
 	db_open(argv[0], GDBM_READER, NULL);
@@ -1035,6 +1051,7 @@ c_filter(int argc, char **argv)
       db_close_if();
       fwrite(key.dptr, key.dsize, 1, stdout);
       fputs(term, stdout);
+      check_eof();
     }
 }
 
@@ -1202,9 +1219,11 @@ c_export(int argc, char **argv)
 	db_get();
 	xmldump(mode, data.dptr, data.dsize, "data");
 	printf("\n </row>\n");
+	check_eof();
       } while (db_next());
   printf("</dbm>\n");
   printf("<!-- %d rows -->\n", row);
+  check_eof();
 }
 
 static int
@@ -1570,7 +1589,7 @@ main(int argc, char **argv)
 	     "\t		[*], [?], [[] matches literal *, ?, [ respectively\n"
 	     "\t		[[-[-] matches [ or -, [z-a] matches b to y\n"
 	     , arg0, DBM_VERSION, __DATE__);
-      return 1;
+      return 10;
     }
   return run(argc, argv);
 }
