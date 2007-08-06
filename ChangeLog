@@ -1,3 +1,11 @@
+2007-08-06    <tino@firebird.03.softkill.net>
+
+	* dbm.c (c_get): as we always close, db_close() is called
+	(my_getchar): added in favor to getchar(), to call db_close_if()
+	more seldom
+	(read_key_term_c, read_key_term_s): now uses my_getchar
+	(c_sadd, c_sdir): added (with helpers, already some weeks old)
+
 2007-04-07    <tino@firebird.03.softkill.net>
 
 	* dbm.c (check_stdout): added.  All routines which output data now

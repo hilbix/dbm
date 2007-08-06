@@ -1,36 +1,8 @@
-Bugfix: Now exit(11) in case that the output pipe goes away.
+Improved: Option -a
+Started to add "Sorted keys directory structure"
 
-When output is futile, DBM shall go away, as further processing is no
-more interesting (as nothing which outputs data does not alter data).
+Option -a was very slow.  Now input is processed in "batches", that is
+the database is closed only between actual read() calls.
 
-And to stress it again:
-
-Currently I use DBM in a fairly complex environment with several
-dozens of scripts running parallely on a handful DBM files
-concurrently.  So I am was able to hunt down some really weird race
-conditions and pitfalls.  I am now pretty sure that I cought the most.
-But one thing cannot be fixed:
-
-Read the virus scanner warning when using DBM under CygWin.  If you
-have several concurrently running processes under Windows which use
-DBM on the same file, you will see that they either starve all or a
-lot of DBM processes start to pile up until your system becomes
-totally unusable.  In this case do following:
-
-<ul>
-<li> Disable the online virus scanner.
-<li> Set the priority of the DBM processes to lowest possible value.
-<li> Kill the processes, each.  After some hours they might go away.
-<li> Uninstall the online virus scanner component and reboot your PC.
-</ul>
-
-Again, this is no fault of DBM.  DBM works correctly as designed.  It
-has no means to detect or circumvent such a case where online virus
-scanners lock files for some time after they were closed or opened by
-an application.  DBM only(!) tries 10 times a second to get a lock on
-the DBM file.  Note that this rate is *low*, as you need N second
-timeout for N processes concurrently accessing the file with this low
-rate to have a high enough chance to get the lock on the DBM file.
-Now, if a virus scanner is able to scan the file 100 times a second
-and you have 5 DBM processes concurrently trying to lock the file,
-this means that you have a 50:50 chance that you get into trouble.
+Also new experimental "sadd" and "sdir" commands introduced.
+"sget" and "sfind" are still missing.

@@ -22,7 +22,10 @@
  * USA
  *
  * $Log$
- * Revision 1.23  2007-04-07 19:03:58  tino
+ * Revision 1.24  2007-08-06 08:14:43  tino
+ * Option -a improvements (and experimental sadd/sdir)
+ *
+ * Revision 1.23  2007/04/07 19:03:58  tino
  * Output pipe breaks now shall terminate DBM correctly
  *
  * Revision 1.22  2007/03/26 18:21:56  tino
@@ -620,7 +623,7 @@ c_get(int argc, char **argv)
   db_get();
   if (!data.dptr)
     exit(1);	/* no data, print nothing, common case!	*/
-  db_close_if();
+  db_close();
   fwrite(data.dptr, data.dsize, 1, stdout);
   check_eof();
 }
@@ -634,7 +637,6 @@ batch_store(int argc, char **argv)
       db_data_noread(0, argv+2);
       db_put(argv[0], 1, 0);
     }
-  db_close_if();
 }
 
 static __inline__ void
@@ -648,14 +650,37 @@ kbuf_set(int i, char c)
   kbuf.dptr[i]	= c;
 }
 
+#define	INBUF_SIZE	10240
+
+static int
+my_getchar(void)
+{
+  static char	*inbuf;
+  static int	inindex, infill;
+
+  if (!inbuf)
+    inbuf	= my_realloc(inbuf, INBUF_SIZE);
+  if (inindex>=infill)
+    {
+      db_close_if();
+      inindex= 0;
+      do
+	{
+	  infill = read(0, inbuf, INBUF_SIZE);
+	} while (infill<0 && (errno==EINTR || errno==EAGAIN));
+    }
+  if (inindex>=infill)
+    return EOF;
+  return (unsigned char)inbuf[inindex++];
+}
+
 static int
 read_key_term_c(int term)
 {
   int	i, c;
 
-  db_close_if();
   kbuf_set(0,0);
-  for (i=0; (c=getchar())!=EOF && c!=term; i++)
+  for (i=0; (c=my_getchar())!=EOF && c!=term; i++)
     kbuf_set(i, c);
   key		= kbuf;
   key.dsize	= i;
@@ -725,11 +750,10 @@ read_key_term_s(const char *term)
   int		i, c, l;
   size_t	len;
 
-  db_close_if();
   kbuf_set(0,0);
   if (!*term)
     {
-      for (i=0; (c=getchar())!=EOF && !isspace(c); i++)
+      for (i=0; (c=my_getchar())!=EOF && !isspace(c); i++)
         kbuf_set(i, c);
       key	= kbuf;
       key.dsize	= i;
@@ -737,7 +761,7 @@ read_key_term_s(const char *term)
     }
   len	= strlen(term)-1;
   l	= term[len];
-  for (i=0; (c=getchar())!=EOF; i++)
+  for (i=0; (c=my_getchar())!=EOF; i++)
     {
       if (c==l && i>=len && (!len || !memcmp(kbuf.dptr+i-len, term, len)))
         {
@@ -1391,7 +1415,6 @@ c_import(int argc, char **argv)
       /* We do not need to adjust the key/data pointers as they came
        * from the global read-buffers.
        */
-      db_close_if();
       if (xmlskip("/data>"))
         ex(0, "data-tag not properly closed in row %d", row);
       if (xmlskip("/row>"))
@@ -1400,6 +1423,238 @@ c_import(int argc, char **argv)
   DP(("import end"));
   if (xmlcmp("/dbm>"))
     ex(0, "missing row-tag/dbm-tag not properly closed in row %d", row);
+}
+
+/**********************************************************************/
+
+static void *
+tmp_buf(size_t len)
+{
+  static char	*tmp;
+
+  tmp	= my_realloc(tmp, len);
+  return tmp;
+}
+
+static void
+my_memcpy(void *to, const void *from, int len)
+{
+  if (len<=0)
+    return;
+  memcpy(to, from, len);
+}
+
+/* Prefix the key in ptr with a 0 byte
+ * (as directory node marker)
+ */
+static void
+sort_key(unsigned char *ptr, size_t len)
+{
+  char	*tmp;
+
+  tmp		= tmp_buf(len+1);
+  tmp[0]	= 0;
+  my_memcpy(tmp+1, ptr, len);
+  key.dptr	= tmp;
+  key.dsize	= len+1;
+}
+
+static int
+sort_check(void)
+{
+  int	off;
+
+  000;	/* check record thoroughly?	*/
+  off	= 0;
+  if (data.dsize<1 || data.dsize>=512 || (off = 1+ *((unsigned char *)data.dptr))>data.dsize)
+    ex(0, "corrupt node data (offset %d len %d)", off, (int)data.dsize);
+  return off;
+}
+
+/* Find the offset in a directory node.
+ *
+ * A directory node has following L bytes data:
+ * - number N<L of prefix chars (0..255)
+ * - the array (sorted) of N prefix chars
+ * - the string (sorted) of L-1-N suffix chars
+ *
+ * Bitmask compressed nodes are reserved for future as follows:
+ * - Directory node has length of 66 bytes (=maximum size!)
+ * - First byte (number) is FF (to denote compressed format)
+ * - 32 bytes of prefix bits, 32 bytes of suffix bits
+ * - Last byte makes parity of the 66 bytes = 0
+ *
+ * if suffix==0 then prepend ptr[-1], else append ptr[len]
+ * Returns insert offset or <=0 when character already present.
+ */
+/* Add something into the node-block
+ */
+static int
+sort_add(int suffix, unsigned char *ptr, size_t len)
+{
+  unsigned char	c, *cp, tmp[512];	/* data.dsize<512	*/
+  int		off;
+
+  sort_key(ptr, len);
+  db_get();
+  c		= suffix ? ptr[len] : ptr[-1];
+
+  if (suffix)
+    {
+      int	i;
+
+      /* If the key does not contain any character different from the
+       * suffix character, then this character must be used as a
+       * prefix.  Note that for the root each c fulfills this.  For
+       * optimization we only need to run this if we have a suffix.
+       */
+      for (i=len;; )
+	if (--i<0)
+	  {
+	    suffix	= 0;	/* suffix is ambiguous	*/
+	    break;
+	  }
+	else if (ptr[i]!=c)
+	  break;		/* different character found	*/
+    }
+
+  cp			= data.dptr;
+  if (!cp)
+    {
+      tmp[0]		= 0;	/* first entry	*/
+      data.dsize	= 1;
+      off		= 1;
+    }
+  else
+    {
+      int	max;
+
+      off		= sort_check();
+
+      /* Initialize compare character c
+       * and the range to compare: cp[0..max[
+       */
+      if (suffix)
+	max		= data.dsize;
+      else
+	{
+	  max		= off;
+	  off		= 1;
+	}
+
+      /* Do the binary tree compare loop
+       */
+      while (off<max)
+	{
+	  int	i;
+
+	  i		= (max+off)/2;
+	  if (c==cp[i])
+	    return 0;	/* found, nothing added	*/
+	  if (c>cp[i])
+	    off		= i+1;
+	  else
+	    max		= i;
+	}
+
+      /* Copy data to tmp buffer, make a hole at off for the new value
+       */
+      memcpy(tmp, data.dptr, off);
+      my_memcpy(tmp+off+1, ((char *)data.dptr)+off, data.dsize-off);
+    }
+
+  tmp[off]	= c;	/* insert character at offset	*/
+  if (!suffix)
+    tmp[0]++;		/* increment prefix count	*/
+  off	= data.dsize+1;	/* remember size	*/
+  
+  data_free();
+  data.dptr	= tmp;
+  data.dsize	= off;
+  db_replace();
+  return 1;
+}
+
+static void
+c_sadd(int argc, char **argv)
+{
+  datum	safe;
+  int	n, i, j;
+  unsigned long	type;
+
+  type	= get_ul(argv[1]);
+  db_data(argc-2, argv+2);
+  db_open(argv[0], GDBM_WRITER, NULL);
+
+  /* Remember key in safe place
+   */
+  safe		= data;
+  data_alloc	= 0;
+
+  /* Start processing
+   */
+  n	= 0;
+  if (type&1)	/* Add head	*/
+    for (i=safe.dsize; --i>=0; )
+      n	+= sort_add(1, safe.dptr, i);
+  if (type&2)	/* Add middle	*/
+    for (j=0; (i=(safe.dsize- ++j))>0; )
+      while (--i>=0)
+	{
+	  n	+= sort_add(1,safe.dptr+j, i);
+	  n	+= sort_add(0,safe.dptr+j, i);
+	}
+  if (type&4)	/* Add tail	*/
+    for (i=safe.dsize; --i>=0; )
+      n	+= sort_add(0, safe.dptr+safe.dsize-i, i);
+
+  printf("%d records added\n", n);
+
+  /* Now finish the transaction
+   *
+   * (replace is wrong, but 
+   */
+  if (gdbm_exists(db, safe))
+    {
+      db_close();
+      exit(n ? 1 : 2);
+    }
+
+  data.dptr	= "";
+  data.dsize	= 0;
+  key		= safe;
+  db_replace();
+
+  /* safe leaks memory here but program ends anyway	*/
+}
+
+static void
+c_sdir(int argc, char **argv)
+{
+  const char	*term;
+  int		i, off, tlen;
+
+  term	= argc>0 ? argv[1] : "\n";
+  tlen	= *term ? strlen(term) : 1;
+  db_data(argc-2, argv+2);
+  db_open(argv[0], GDBM_READER, NULL);
+  sort_key(data.dptr, data.dsize);
+  db_get();
+  if (!data.dptr)
+    exit(1);
+  off	= sort_check();
+  for (i=0; ++i<off; )
+    {
+      putchar(((char *)data.dptr)[i]);
+      fwrite((char *)key.dptr+1, key.dsize-1, 1, stdout);
+      fwrite(term, tlen, 1, stdout);
+    }
+  for (; i<data.dsize; i++)
+    {
+      fwrite((char *)key.dptr+1, key.dsize-1, 1, stdout);
+      putchar(((char *)data.dptr)[i]);
+      fwrite(term, tlen, 1, stdout);
+    }
 }
 
 #ifdef DBM_SERVER
@@ -1477,6 +1732,8 @@ struct
     { "search",	c_search,	2, -1	},
     { "nfind",	c_nfind,	2, -1	},
     { "nsearch",c_nsearch,	2, -1	},
+    { "sadd",	c_sadd,		1, 2	},
+    { "sdir",	c_sdir,		0, 2	},
   };
 
 static int run(int argc, char **argv);
@@ -1588,6 +1845,19 @@ main(int argc, char **argv)
 	     "\tpattern help:   ?, *, [^xyz] or [a-z] are supported.  Hints:\n"
 	     "\t		[*], [?], [[] matches literal *, ?, [ respectively\n"
 	     "\t		[[-[-] matches [ or -, [z-a] matches b to y\n"
+	     "\n"
+	     "EXPERIMENTAL:\n"
+	     "\tsadd  w [k]	Add a key as a word-list (k missing read from stdin)\n"
+	     "\t		w is the word type: 1=prefix 2=middle 4=suffix\n"
+	     "\t		data for key k is set to the empty string '' on adds\n"
+	     "\t		Note that k must not contain NUL bytes (when read).\n"
+	     "\tsdir  [s [k]]	list directory-entry for k, if key='' list top\n"
+	     "\t		s is the output key terminator, use '' for NUL\n"
+#if 0
+	     "\tsget  n [k]	Get a key as a word-list plus n later keys\n"
+	     "\t		m is the number, if negative result goes backward\n"
+	     "\tsfind n [k]	Find keys via words with max n results (n=0: all)\n"
+#endif
 	     , arg0, DBM_VERSION, __DATE__);
       return 10;
     }
