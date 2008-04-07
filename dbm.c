@@ -22,6 +22,10 @@
  * USA
  *
  * $Log$
+ * Revision 1.25  2008-04-07 02:05:52  tino
+ * See ChangeLog.
+ * Also some compile warnings were eliminated.
+ *
  * Revision 1.24  2007-08-06 08:14:43  tino
  * Option -a improvements (and experimental sadd/sdir)
  *
@@ -143,10 +147,23 @@ dprintf(const char *s, ...)
 }
 #endif
 
-static int ignoresleep, advancedsleep;
+static int ignoresleep, advancedsleep, noflush, unbuffered;
 static const char	*db_name;
 
 static void db_close(void);
+
+/* BAD SIDEFFECT WARNING!
+ *
+ * This overrides the library function used in the GDBM library!
+ * (At least it tries to.)
+ */
+int
+fsync(int fd)
+{
+  if (noflush)
+    return 0;
+  return fdatasync(fd);
+}
 
 static void
 ex(int nr, const char *s, ...)
@@ -208,6 +225,8 @@ get_ul(const char *arg)
 static void
 check_eof(void)
 {
+  if (unbuffered)
+    fflush(stdout);
   if (ferror(stdout) || feof(stdout))
     exit(11);
 }
@@ -296,15 +315,19 @@ db_next(void)
   return key.dptr!=0;
 }
 
+static void out_end(void);
+
 static void
 db_close(void)
 {
   if (db)
     {
-      gdbm_sync(db);
+      if (!noflush)
+	gdbm_sync(db);
       gdbm_close(db);
+      db	= 0;
+      out_end();
     }
-  db	= 0;
 }
 
 static void
@@ -652,6 +675,72 @@ kbuf_set(int i, char c)
 
 #define	INBUF_SIZE	10240
 
+static void
+out_imp(int c)
+{
+  static char	*outbuf;
+  static int	outfill;
+
+  if (!outbuf)
+    outbuf	= my_realloc(outbuf, INBUF_SIZE);
+  if (c==EOF || outfill>=sizeof (outbuf))
+    {
+      db_close_if();
+      fwrite(outbuf, outfill, 1, stdout);
+      check_eof();
+      outfill	= 0;
+    }
+  if (c!=EOF)
+    outbuf[outfill++]	= c;
+}
+
+static void
+out_end(void)
+{
+  out_imp(EOF);
+}
+
+static void
+out(char c)
+{
+  out_imp((unsigned char)c);
+}
+
+/* Sideeffect-warning:
+ *
+ * THIS MIGHT CLOSE THE DB!  Do not use on routines which need to keep
+ * the DB handle open (like first/next).
+ */
+static void
+my_putbuf(const void *_buf, size_t len)
+{
+  const char	*buf=_buf;
+
+  while (len)
+    {
+      out(*buf++);
+      len--;
+    }
+  /* actually this is a hack that here is no out_end()	*/
+}
+
+static void
+my_putchar(char c)
+{
+  out(c);
+  if (unbuffered)	/* actually this is a hack for EOL	*/
+    out_end();
+}
+
+static void
+my_puts(const char *s)
+{
+  while (*s)
+    out(*s++);
+  if (unbuffered)	/* actually this is a hack for EOL	*/
+    out_end();
+}
+
 static int
 my_getchar(void)
 {
@@ -945,20 +1034,17 @@ dobget(char **argv, char *sep)
   if (!db)
     db_open(argv[0], GDBM_READER, NULL);
   db_get();
-  db_close_if();
   if (!data.dptr)
     ex(1, "key does not exist: %.*s", (int)key.dsize, key.dptr);
   if (sep)
     {
-      fwrite(key.dptr, key.dsize, 1, stdout);
+      my_putbuf(key.dptr, key.dsize);
       if (!seplen)
 	seplen	= *sep ? strlen(sep) : 1;
-      fwrite(sep, seplen, 1, stdout);
-      check_eof();
+      my_putbuf(sep, seplen);
     }
-  fwrite(data.dptr, data.dsize, 1, stdout);
-  putchar('\n');
-  check_eof();
+  my_putbuf(data.dptr, data.dsize);
+  my_putchar('\n');
 }
 
 static void
@@ -975,6 +1061,7 @@ c_bget(int argc, char **argv)
       if (c==EOF)
 	break;
     }
+  out_end();
 }
 
 static void
@@ -986,10 +1073,11 @@ c_bget0(int argc, char **argv)
   sep	= (argc>0 ? argv[1] : 0);
   while ((c=read_key_term_c(0))!=EOF)
     dobget(argv, sep);
+  out_end();
 }
 
 static void
-c_filter(int argc, char **argv)
+do_filter(int argc, char **argv, int null)
 {
   const char	*term, *d;
   int		k, m, p, i, c, dl;
@@ -1004,7 +1092,7 @@ c_filter(int argc, char **argv)
   p	= *term ? *term++!='0' : 0;
   if (!*term)
     term	= "\n";
-  for (i=0; ((c=read_key_term_s(term))!=EOF || key.dsize); i++)
+  for (i=0; ((c=(null ? read_key_term_c(0) : read_key_term_s(term)))!=EOF || key.dsize); i++)
     {
       if (!db)
 	db_open(argv[0], GDBM_READER, NULL);
@@ -1072,11 +1160,25 @@ c_filter(int argc, char **argv)
 	   continue;		/* -1x 1X 0	*/
 	}			/* -1x 1x 1	*/
       DP(("put"));
-      db_close_if();
-      fwrite(key.dptr, key.dsize, 1, stdout);
-      fputs(term, stdout);
-      check_eof();
+      my_putbuf(key.dptr, key.dsize);
+      if (null)
+	my_putchar(0);
+      else
+	my_puts(term);
     }
+  out_end();
+}
+
+static void
+c_filter(int argc, char **argv)
+{
+  do_filter(argc, argv, 0);
+}
+
+static void
+c_filter0(int argc, char **argv)
+{
+  do_filter(argc, argv, 1);
 }
 
 static int
@@ -1090,7 +1192,7 @@ xmlspecial(unsigned char c)
 }
 
 static void
-xmlescape(const unsigned char *ptr, size_t len, const char *format)
+xmlescape(const char *ptr, size_t len, const char *format)
 {
   unsigned char	c;
   int		i;
@@ -1105,10 +1207,10 @@ xmlescape(const unsigned char *ptr, size_t len, const char *format)
 }
 
 static int
-xmlplaintext(const unsigned char *ptr, size_t len)
+xmlplaintext(const char *ptr, size_t len)
 {
   while (len)
-    if (xmlspecial(*ptr++))
+    if (xmlspecial((unsigned char)*ptr++))
       return 0;
   return 1;
 }
@@ -1171,7 +1273,7 @@ xmlencode(int base, int miniblock, const unsigned char *ptr, size_t len)
 #endif
 
 static void
-xmldump(int mode, const unsigned char *ptr, size_t len, const char *ele)
+xmldump(int mode, const char *ptr, size_t len, const char *ele)
 {
   if (mode<=0 || xmlplaintext(ptr, len))
     {
@@ -1448,7 +1550,7 @@ my_memcpy(void *to, const void *from, int len)
  * (as directory node marker)
  */
 static void
-sort_key(unsigned char *ptr, size_t len)
+sort_key(const char *ptr, size_t len)
 {
   char	*tmp;
 
@@ -1490,7 +1592,7 @@ sort_check(void)
 /* Add something into the node-block
  */
 static int
-sort_add(int suffix, unsigned char *ptr, size_t len)
+sort_add(int suffix, const char *ptr, size_t len)
 {
   unsigned char	c, *cp, tmp[512];	/* data.dsize<512	*/
   int		off;
@@ -1514,11 +1616,11 @@ sort_add(int suffix, unsigned char *ptr, size_t len)
 	    suffix	= 0;	/* suffix is ambiguous	*/
 	    break;
 	  }
-	else if (ptr[i]!=c)
+	else if ((unsigned char)ptr[i]!=c)
 	  break;		/* different character found	*/
     }
 
-  cp			= data.dptr;
+  cp			= (unsigned char *)data.dptr;
   if (!cp)
     {
       tmp[0]		= 0;	/* first entry	*/
@@ -1569,7 +1671,7 @@ sort_add(int suffix, unsigned char *ptr, size_t len)
   off	= data.dsize+1;	/* remember size	*/
   
   data_free();
-  data.dptr	= tmp;
+  data.dptr	= (char *)tmp;
   data.dsize	= off;
   db_replace();
   return 1;
@@ -1728,6 +1830,7 @@ struct
     { "brep",	c_brep,		0, 2	},
     { "bupd",	c_bupd,		0, 2	},
     { "filter",	c_filter,	0, 2	},
+    { "filter0",c_filter0,	0, 2	},
     { "find",	c_find,		2, -1	},
     { "search",	c_search,	2, -1	},
     { "nfind",	c_nfind,	2, -1	},
@@ -1755,18 +1858,26 @@ main(int argc, char **argv)
 	ignoresleep=1;			/* set quiet timeout	*/
       case 't':
 	timeout=atoi(*++argv+2);	/* set timeout	*/
+	if (0)
+      case 'n':
+	noflush=1;			/* set unflushed	*/
+	if (0)
+      case 'u':
+	unbuffered=1;			/* unbuffered output	*/
 	argc--;
 	break;
       }
   if (argc<2)
     {
-      printf("Usage: %s [-tSEC|-qSEC] action gdbm-file [args...]\n"
+      printf("Usage: %s [-tSEC|-qSEC|-aSEC|-n|-u] action gdbm-file [args...]\n"
 	     "\tVersion %s compiled %s\n"
 	     "\treturn 0=ok 1=missing_key 2=no_store 10=other 255=locked/timeout\n"
 	     "\n"
 	     "\t-aSEC	advanced timeout, like -q, but keep db closed if possible\n"
 	     "\t-qSEC	quiet timeout, like -t\n"
 	     "\t-tSEC	timeout in seconds, -1=unlimited, 0=none (default)\n"
+	     "\t-u	unbuffered\n"
+	     "\t-n	noflush\n"
 	     "\n"
 	     "\tAction	Args	Description:\n"
 	     "\t-------	-------	------------\n"
@@ -1833,7 +1944,8 @@ main(int argc, char **argv)
 	     "\t		Key must (k!=0) or must not exist (k=0)\n"
 	     "\t		Data must match (m!=0) or must not match (m=0)\n"
 	     "\t		Data match is exact (p=0) or pattern (p!=0)\n"
-	     "\t		t is the line terminater, default ''=LF\n"
+	     "\t		t is the line terminator, default ''=LF\n"
+	     "\tfilter0	kmp d	as before, but term is NUL\n"
 	     "\n"
 	     "\tfind	n data	find n keys which have exact data (slow), 0=all\n"
 	     "\t		Multiple data arguments give alternatives (=OR)\n"

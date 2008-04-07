@@ -1,3 +1,13 @@
+2008-04-07  Valentin Hilbig  <tino@firebird.03.softkill.net>
+
+	* dbm.c (fsync, db_close, main): added noflush (unsynced) option.
+	(c_filter0): added
+	(my_putchar, dobget, c_bget, c_bget0, do_filter): speedup for -a
+
+2008-01-28  Valentin Hilbig  <tino@firebird.03.softkill.net>
+
+	* dbm.c (main): typo (terminater)
+
 2007-08-06    <tino@firebird.03.softkill.net>
 
 	* dbm.c (c_get): as we always close, db_close() is called

@@ -1,8 +1,15 @@
 Improved: Option -a
-Started to add "Sorted keys directory structure"
+Added: Option -n and -u
 
-Option -a was very slow.  Now input is processed in "batches", that is
-the database is closed only between actual read() calls.
+Option -a still was too slow on outputs.  Now output is processed in
+"batches", too.
 
-Also new experimental "sadd" and "sdir" commands introduced.
-"sget" and "sfind" are still missing.
+Option -u flushes output as soon as meaningful.  Together with Option
+-a this nearly brings back the old behavior (db close on each line).
+
+Option -n suppresses fsync() on the GDBM file.  Changes in the DB are
+factors faster on machines which are heavily loaded with IO.
+Especially useful on option -a and batch commands.  However the DBM is
+not synced anymore, so a sudden power loss can have a more bad impact
+then it already has (often I observed that a sudden power loss
+corrupts the DBM).
