@@ -4,7 +4,7 @@
  *
  * This source shall be independent of others.  Therefor no tinolib.
  *
- * Copyright (C)2004-2007 by Valentin Hilbig <webmaster@scylla-charybdis.com>
+ * Copyright (C)2004-2008 by Valentin Hilbig <webmaster@scylla-charybdis.com>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -22,6 +22,9 @@
  * USA
  *
  * $Log$
+ * Revision 1.26  2008-05-19 09:47:25  tino
+ * find now returns 1 if nothing found
+ *
  * Revision 1.25  2008-04-07 02:05:52  tino
  * See ChangeLog.
  * Also some compile warnings were eliminated.
@@ -706,6 +709,13 @@ out(char c)
   out_imp((unsigned char)c);
 }
 
+static void
+out_s(const char *s)
+{
+  while (*s)
+    out(*s++);
+}
+
 /* Sideeffect-warning:
  *
  * THIS MIGHT CLOSE THE DB!  Do not use on routines which need to keep
@@ -733,10 +743,18 @@ my_putchar(char c)
 }
 
 static void
+my_put_nr(int n)
+{
+  char	buf[30];
+
+  snprintf(buf, sizeof buf, "%d", n);
+  out_s(buf);
+}
+
+static void
 my_puts(const char *s)
 {
-  while (*s)
-    out(*s++);
+  out_s(s);
   if (unbuffered)	/* actually this is a hack for EOL	*/
     out_end();
 }
@@ -773,6 +791,38 @@ read_key_term_c(int term)
     kbuf_set(i, c);
   key		= kbuf;
   key.dsize	= i;
+  return c;
+}
+
+static int
+read_data_term_c(int term)
+{
+  datum	tmp1, tmp2;
+  int	c;
+
+  if (data_alloc)	/* shall never happen	*/
+    data_free();
+
+  /* ugly hack: switch to kbuf2
+   */
+  tmp1	= key;
+  tmp2	= kbuf;
+  kbuf	= kbuf2;
+
+  c	= read_key_term_c(term);
+
+  /* ugly hack:
+   * store key value as data
+   */
+  data	= key;
+
+  /* ugly hack:
+   * switch back
+   */
+  kbuf2	= kbuf;
+  kbuf	= tmp2;
+  key	= tmp1;
+
   return c;
 }
 
@@ -996,10 +1046,12 @@ hunt(int match, int wild, int argc, char **argv)
 	  fwrite(key.dptr, key.dsize, 1, stdout);
 	  putchar('\n');
 	  check_eof();
-	  if (n && ++i>=n)
+	  if (++i>=n && n)
 	    return;
 	}
     } while (db_next());
+  if (!i)
+    exit(1);	/* No data, printed nothing, common case	*/
 }
 
 static void
@@ -1529,6 +1581,7 @@ c_import(int argc, char **argv)
 
 /**********************************************************************/
 
+#ifdef NOT_READY
 static void *
 tmp_buf(size_t len)
 {
@@ -1550,15 +1603,18 @@ my_memcpy(void *to, const void *from, int len)
  * (as directory node marker)
  */
 static void
-sort_key(const char *ptr, size_t len)
+sort_key(int type, const char *ptr, int len)
 {
   char	*tmp;
 
   tmp		= tmp_buf(len+1);
   tmp[0]	= 0;
-  my_memcpy(tmp+1, ptr, len);
+  tmp[1]	= type;
+  my_memcpy(tmp+2, ptr, abs(len));
+  if (len<0)
+    my_memrev(tmp+2, -len);
   key.dptr	= tmp;
-  key.dsize	= len+1;
+  key.dsize	= abs(len)+2;
 }
 
 static int
@@ -1573,52 +1629,29 @@ sort_check(void)
   return off;
 }
 
-/* Find the offset in a directory node.
+/* Find or add the offset in a directory node.
  *
- * A directory node has following L bytes data:
- * - number N<L of prefix chars (0..255)
- * - the array (sorted) of N prefix chars
- * - the string (sorted) of L-1-N suffix chars
+ * A prefix directory node has following structure:
+ * - The key is the partial string starting up to here, starting with a 00 and 01 byte.
+ * - Data contains NUL terminated substrings of deeper directory entries.
  *
- * Bitmask compressed nodes are reserved for future as follows:
- * - Directory node has length of 66 bytes (=maximum size!)
- * - First byte (number) is FF (to denote compressed format)
- * - 32 bytes of prefix bits, 32 bytes of suffix bits
- * - Last byte makes parity of the 66 bytes = 0
+ * A partial directory node has following structure:
+ * - The key is the partial string up to here, starting with a 00 and 02 byte.
+ * - Data contains NUL terminated substrings of deeper directory entries.
  *
- * if suffix==0 then prepend ptr[-1], else append ptr[len]
- * Returns insert offset or <=0 when character already present.
- */
-/* Add something into the node-block
+ * A reverse directory node has following structure:
+ * - The key is the partial reversed string up to here, starting with a 00 and 03 byte.
+ * - Data contains NUL terminated substrings of deeper directory reversed entries.
  */
 static int
-sort_add(int suffix, const char *ptr, size_t len)
+sort_add(int type, const char *ptr, size_t len)
 {
   unsigned char	c, *cp, tmp[512];	/* data.dsize<512	*/
   int		off;
 
-  sort_key(ptr, len);
+  sort_key(type, ptr, len);
   db_get();
   c		= suffix ? ptr[len] : ptr[-1];
-
-  if (suffix)
-    {
-      int	i;
-
-      /* If the key does not contain any character different from the
-       * suffix character, then this character must be used as a
-       * prefix.  Note that for the root each c fulfills this.  For
-       * optimization we only need to run this if we have a suffix.
-       */
-      for (i=len;; )
-	if (--i<0)
-	  {
-	    suffix	= 0;	/* suffix is ambiguous	*/
-	    break;
-	  }
-	else if ((unsigned char)ptr[i]!=c)
-	  break;		/* different character found	*/
-    }
 
   cp			= (unsigned char *)data.dptr;
   if (!cp)
@@ -1677,58 +1710,103 @@ sort_add(int suffix, const char *ptr, size_t len)
   return 1;
 }
 
-static void
-c_sadd(int argc, char **argv)
+static int
+sort_sadd(const char *argv0, unsigned long type)
 {
   datum	safe;
-  int	n, i, j;
-  unsigned long	type;
+  int	safe_alloc;
+  int	n, i;
 
-  type	= get_ul(argv[1]);
-  db_data(argc-2, argv+2);
-  db_open(argv[0], GDBM_WRITER, NULL);
+  if (!db)
+    db_open(argv0, GDBM_WRITER, NULL);
 
   /* Remember key in safe place
    */
+  safe_alloc	= data_alloc;
   safe		= data;
   data_alloc	= 0;
 
   /* Start processing
    */
-  n	= 0;
-  if (type&1)	/* Add head	*/
-    for (i=safe.dsize; --i>=0; )
-      n	+= sort_add(1, safe.dptr, i);
-  if (type&2)	/* Add middle	*/
-    for (j=0; (i=(safe.dsize- ++j))>0; )
-      while (--i>=0)
-	{
-	  n	+= sort_add(1,safe.dptr+j, i);
-	  n	+= sort_add(0,safe.dptr+j, i);
-	}
-  if (type&4)	/* Add tail	*/
-    for (i=safe.dsize; --i>=0; )
-      n	+= sort_add(0, safe.dptr+safe.dsize-i, i);
+  n	= sort_add(0, safe.dptr, safe.dsize);
+#if 0
+  if (type>1)
+    for (i=0; ++i<safe.dsize; )
+      n	+= sort_add(1, safe.dptr+i, safe.dsize-i);
+#endif
 
-  printf("%d records added\n", n);
-
-  /* Now finish the transaction
+  /* Now add the key
    *
-   * (replace is wrong, but 
+   * (replace is wrong, but it is convenient here)
    */
-  if (gdbm_exists(db, safe))
+  if (!gdbm_exists(db, safe))
+    {
+      data.dptr	= "";
+      data.dsize= 0;
+      key	= safe;
+      db_replace();
+      ret	= 0;
+    }
+  else if (n)
+    ret		= 1;
+  else
+    ret		= 2;
+
+  my_put_nr(n);
+  my_puts(" records added\n");
+
+  /* go back to old data
+   */
+  data		= safe;
+  data_alloc	= safe_alloc;
+  return ret;
+}
+
+static void
+c_sadd(int argc, char **argv)
+{
+  unsigned long	type;
+
+  type	= get_ul(argv[1]);
+  db_data(argc-2, argv+2);
+  ret	= sort_sadd(argv[0], type);
+  if (ret)
     {
       db_close();
-      exit(n ? 1 : 2);
+      exit(ret};
     }
-
-  data.dptr	= "";
-  data.dsize	= 0;
-  key		= safe;
-  db_replace();
-
-  /* safe leaks memory here but program ends anyway	*/
 }
+
+static void
+c_sbatch(int argc, char **argv)
+{
+  const char	*term;
+  unsigned long	type;
+  int		c, ret;
+
+  type	= get_ul(argv[1]);
+  term	= "";
+  if (argc==2)
+    {
+      term	= argv[2];
+      if (!*term)
+	term	= 0;
+    }
+  do
+    {
+      if (term)
+	c	= read_data_term_s(term);
+      else
+	c	= read_data_term_c(0);
+      ret	= sort_sadd(argv[0], type);
+      if (ret)
+	{
+	  db_close();
+	  exit(ret};
+	}
+    } while (c!=EOF);
+}
+
 
 static void
 c_sdir(int argc, char **argv)
@@ -1758,6 +1836,7 @@ c_sdir(int argc, char **argv)
       fwrite(term, tlen, 1, stdout);
     }
 }
+#endif
 
 #ifdef DBM_SERVER
 /* not yet ready
@@ -1835,8 +1914,11 @@ struct
     { "search",	c_search,	2, -1	},
     { "nfind",	c_nfind,	2, -1	},
     { "nsearch",c_nsearch,	2, -1	},
+#ifdef NOT_READY
     { "sadd",	c_sadd,		1, 2	},
+    { "sbatch",	c_batch,	1, 2	},
     { "sdir",	c_sdir,		0, 2	},
+#endif
   };
 
 static int run(int argc, char **argv);
@@ -1871,13 +1953,16 @@ main(int argc, char **argv)
     {
       printf("Usage: %s [-tSEC|-qSEC|-aSEC|-n|-u] action gdbm-file [args...]\n"
 	     "\tVersion %s compiled %s\n"
-	     "\treturn 0=ok 1=missing_key 2=no_store 10=other 255=locked/timeout\n"
+	     "\treturn 0=ok 1=miss_key 2=no_store 10=other 11=EOF 255=lock/timeout\n"
 	     "\n"
 	     "\t-aSEC	advanced timeout, like -q, but keep db closed if possible\n"
 	     "\t-qSEC	quiet timeout, like -t\n"
 	     "\t-tSEC	timeout in seconds, -1=unlimited, 0=none (default)\n"
-	     "\t-u	unbuffered\n"
-	     "\t-n	noflush\n"
+	     "\t-u	Unbuffered output.  Flushes each line. (slows -a)\n"
+	     "\t-n	Noflush, suppress sync on GDBM close. (speeds writes)\n"
+	     "\n"
+	     "\tON WINDOWS -a, -q and -t will show strange sideffects when there\n"
+	     "\tis an online virus scanner active.  This is not a DBM bug.\n"
 	     "\n"
 	     "\tAction	Args	Description:\n"
 	     "\t-------	-------	------------\n"
@@ -1949,6 +2034,7 @@ main(int argc, char **argv)
 	     "\n"
 	     "\tfind	n data	find n keys which have exact data (slow), 0=all\n"
 	     "\t		Multiple data arguments give alternatives (=OR)\n"
+	     "\t		Now returns FALSE(1) if no data has been found\n"
 	     "\tsearch	n patrn	as before, but use patterns\n"
 	     "\tnfind	n data	like find, but data must not match\n"
 	     "\tnsearch	n patrn	like search, but data must not match\n"
@@ -1960,15 +2046,18 @@ main(int argc, char **argv)
 	     "\n"
 	     "EXPERIMENTAL:\n"
 	     "\tsadd  w [k]	Add a key as a word-list (k missing read from stdin)\n"
-	     "\t		w is the word type: 1=prefix 2=middle 4=suffix\n"
+	     "\t		w is the word type: 1=prefix 2(or higher)=suffix\n"
 	     "\t		data for key k is set to the empty string '' on adds\n"
-	     "\t		Note that k must not contain NUL bytes (when read).\n"
-	     "\tsdir  [s [k]]	list directory-entry for k, if key='' list top\n"
+	     "\t		Note that k cannot contain NUL bytes (when read).\n"
+	     "\tsbatch w [q]	Add keys as a word-list.\n"
+	     "\t		q is the line terminator.  Default blanks, ''=NUL\n"
+	     "\t		Note that the keys cannot contain NUL bytes.\n"
+	     "\tsdir  [p [k]]	list directory-entry for k, if key='' list top\n"
 	     "\t		s is the output key terminator, use '' for NUL\n"
 #if 0
-	     "\tsget  n [k]	Get a key as a word-list plus n later keys\n"
+	     "\tsget  m [k]	Get m later keys from key k.  key='' to start\n"
 	     "\t		m is the number, if negative result goes backward\n"
-	     "\tsfind n [k]	Find keys via words with max n results (n=0: all)\n"
+	     "\tsfind m [k]	Find keys via words with max m results (m=0: all)\n"
 #endif
 	     , arg0, DBM_VERSION, __DATE__);
       return 10;

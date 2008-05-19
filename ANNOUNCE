@@ -1,15 +1,10 @@
-Improved: Option -a
-Added: Option -n and -u
+<b>Functions sadd and sdir removed for re-write</b>
 
-Option -a still was too slow on outputs.  Now output is processed in
-"batches", too.
+The "find" function now returns FALSE in case it does not find anything.
+This is to more easily differ from the case when it returns a blank result,
+which, from shell, does look alike.
 
-Option -u flushes output as soon as meaningful.  Together with Option
--a this nearly brings back the old behavior (db close on each line).
-
-Option -n suppresses fsync() on the GDBM file.  Changes in the DB are
-factors faster on machines which are heavily loaded with IO.
-Especially useful on option -a and batch commands.  However the DBM is
-not synced anymore, so a sudden power loss can have a more bad impact
-then it already has (often I observed that a sudden power loss
-corrupts the DBM).
+The "sadd" and "sdir" functions have proven badly designed, so they will be
+re-invented with another algorithm.  This is an intermediate version which
+removes the old "sadd" and "sdir" function.  If you need the old behavior,
+stick to version 0.10.x
