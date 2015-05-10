@@ -1,0 +1,5 @@
+*.d
+*.o
+*~
+dbm
+dbm_version.h

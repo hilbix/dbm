@@ -1,10 +1,2 @@
-<b>Functions sadd and sdir removed for re-write</b>
-
-The "find" function now returns FALSE in case it does not find anything.
-This is to more easily differ from the case when it returns a blank result,
-which, from shell, does look alike.
-
-The "sadd" and "sdir" functions have proven badly designed, so they will be
-re-invented with another algorithm.  This is an intermediate version which
-removes the old "sadd" and "sdir" function.  If you need the old behavior,
-stick to version 0.10.x
+Announcements are now in the git commit log:
+git log --follow VERSION
