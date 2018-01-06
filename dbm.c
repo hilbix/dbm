@@ -1980,6 +1980,7 @@ main(int argc, char **argv)
 	     "\n"
 	     "\tlist	[n [p]]	write n keys to stdout, default 1, 0=all\n"
 	     "\t		p is the line terminator, default LF, '' for NUL\n"
+	     "\t		(option -a has no effect here)\n"
 	     "\tdump	[n]	diagnostic dump, default 0=all\n"
 	     "\timport	[file]	read database from what export wrote\n"
 	     "\t		Please note that DBM does not parse XML!\n"
