@@ -1,11 +1,11 @@
 # Makefile automatically generated, do not edit!
 # This output (only this Makefile) is Public Domain.
 #
-#@MD5TINOIGN@ Creation date: Tue Aug 29 10:32:05 DST 2017
+#@MD5TINOIGN@ Creation date: Sat Jan  6 12:19:55 CET 2018
 #
 # This file is based on following files:
 #@MD5TINOIGN@ 1: Makefile.tino
-#@MD5TINOIGN@ 2: /home/tino/src/dbm/tino/Makefile.proto
+#@MD5TINOIGN@ 2: /home/tino/git/src/dbm/tino/Makefile.proto
 
 #
 #@MD5TINOIGN@ included: Makefile.tino
@@ -21,8 +21,10 @@ ADD_LDFLAGS=
   DISTCLEAN=*.tmp
    TINOCOPY=tino/memwild.h
 
+INSTALLPATH=/usr/local
+
 #
-#@MD5TINOIGN@ included: /home/tino/src/dbm/tino/Makefile.proto
+#@MD5TINOIGN@ included: /home/tino/git/src/dbm/tino/Makefile.proto
 #
 
 # Automatically generated from "PROGS" above
@@ -33,7 +35,6 @@ ADD_LDFLAGS=
  STD_CCFLAGS=-g -Wall -Wno-unused-function -O3 -Wno-error=unused-value -Wno-error=unused-function
 STD_LDFLAGS=
  STD_LDLIBS=
-INSTALLPATH=$(HOME)
     BINPATH=bin
    SBINPATH=sbin
     LIBPATH=lib
