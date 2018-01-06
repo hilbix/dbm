@@ -1939,13 +1939,14 @@ main(int argc, char **argv)
       case 'q':
 	ignoresleep=1;			/* set quiet timeout	*/
       case 't':
-	timeout=atoi(*++argv+2);	/* set timeout	*/
+	timeout=atoi(argv[1]+2);	/* set timeout	*/
 	if (0)
       case 'n':
 	noflush=1;			/* set unflushed	*/
 	if (0)
       case 'u':
 	unbuffered=1;			/* unbuffered output	*/
+	argv++;
 	argc--;
 	break;
       }
